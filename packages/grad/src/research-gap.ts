@@ -1,0 +1,113 @@
+import type { ResearchGap } from "./types.js";
+
+export class ResearchGapAnalyzer {
+  analyzeGaps(
+    papers: Array<{ title: string; limitations: string; futureWork: string }>,
+  ): ResearchGap[] {
+    const gaps: ResearchGap[] = [];
+
+    for (const paper of papers) {
+      const limitationParts = paper.limitations
+        .split(/[.;。；]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 10);
+
+      const futureWorkParts = paper.futureWork
+        .split(/[.;。；]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 10);
+
+      for (const limitation of limitationParts) {
+        gaps.push({
+          id: crypto.randomUUID(),
+          projectId: "",
+          description: limitation,
+          evidence: [paper.title],
+          feasibility: 5,
+          risk: 5,
+          requiredExperiments: [],
+          relatedPapers: [paper.title],
+        });
+      }
+
+      for (const future of futureWorkParts) {
+        gaps.push({
+          id: crypto.randomUUID(),
+          projectId: "",
+          description: future,
+          evidence: [paper.title],
+          feasibility: 7,
+          risk: 3,
+          requiredExperiments: [],
+          relatedPapers: [paper.title],
+        });
+      }
+    }
+
+    const mergedGaps = this.mergeSimilarGaps(gaps);
+    return mergedGaps.map((gap) => ({
+      ...gap,
+      feasibility: this.estimateFeasibility(gap),
+      risk: this.estimateRisk(gap),
+    }));
+  }
+
+  scoreGap(gap: ResearchGap): number {
+    const feasibilityScore = gap.feasibility / 10;
+    const evidenceScore = Math.min(1, gap.evidence.length / 3);
+    const riskPenalty = gap.risk / 20;
+    return Math.round((feasibilityScore * 0.4 + evidenceScore * 0.3 + (1 - riskPenalty) * 0.3) * 100);
+  }
+
+  private mergeSimilarGaps(gaps: ResearchGap[]): ResearchGap[] {
+    const merged: ResearchGap[] = [];
+    const used = new Set<number>();
+
+    for (let i = 0; i < gaps.length; i++) {
+      if (used.has(i)) continue;
+
+      const current = { ...gaps[i]! };
+      const similarIndices: number[] = [];
+
+      for (let j = i + 1; j < gaps.length; j++) {
+        if (used.has(j)) continue;
+
+        const other = gaps[j]!;
+        const words1 = new Set(current.description.toLowerCase().split(/\s+/));
+        const words2 = new Set(other.description.toLowerCase().split(/\s+/));
+        const intersection = [...words1].filter((w) => words2.has(w) && w.length > 3);
+        const union = new Set([...words1, ...words2]);
+
+        if (union.size > 0 && intersection.length / union.size > 0.3) {
+          similarIndices.push(j);
+        }
+      }
+
+      for (const idx of similarIndices) {
+        used.add(idx);
+        const other = gaps[idx]!;
+        current.evidence = [...new Set([...current.evidence, ...other.evidence])];
+        current.relatedPapers = [...new Set([...current.relatedPapers, ...other.relatedPapers])];
+      }
+
+      merged.push(current);
+    }
+
+    return merged;
+  }
+
+  private estimateFeasibility(gap: ResearchGap): number {
+    let score = 5;
+    if (gap.evidence.length >= 3) score += 2;
+    else if (gap.evidence.length >= 2) score += 1;
+    if (gap.description.length > 50) score += 1;
+    return Math.min(10, score);
+  }
+
+  private estimateRisk(gap: ResearchGap): number {
+    let score = 5;
+    if (gap.evidence.length <= 1) score += 2;
+    if (gap.requiredExperiments.length > 3) score += 1;
+    return Math.min(10, score);
+  }
+}

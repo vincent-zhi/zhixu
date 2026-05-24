@@ -1,0 +1,34 @@
+{
+  "name": "@zhixu/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter @zhixu/core build && pnpm --filter @zhixu/agent-core build && pnpm --filter @zhixu/agent-os build && pnpm --filter @zhixu/config build && pnpm --filter @zhixu/skill-runtime build && pnpm --filter @zhixu/document-intelligence build && pnpm --filter @zhixu/artifact-factory build && pnpm --filter @zhixu/model-gateway build && tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "pnpm --filter @zhixu/core build && pnpm --filter @zhixu/agent-core build && pnpm --filter @zhixu/agent-os build && pnpm --filter @zhixu/skill-runtime build && pnpm --filter @zhixu/document-intelligence build && pnpm --filter @zhixu/artifact-factory build && pnpm --filter @zhixu/model-gateway build && vitest run",
+    "typecheck": "pnpm --filter @zhixu/core build && pnpm --filter @zhixu/agent-core build && pnpm --filter @zhixu/agent-os build && pnpm --filter @zhixu/config build && pnpm --filter @zhixu/skill-runtime build && pnpm --filter @zhixu/document-intelligence build && pnpm --filter @zhixu/artifact-factory build && pnpm --filter @zhixu/model-gateway build && tsc -p tsconfig.json --noEmit",
+    "lint": "pnpm typecheck"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/helmet": "^13.0.2",
+    "@zhixu/agent-core": "workspace:*",
+    "@zhixu/agent-os": "workspace:*",
+    "@zhixu/config": "workspace:*",
+    "@zhixu/artifact-factory": "workspace:*",
+    "@zhixu/core": "workspace:*",
+    "@zhixu/db": "workspace:*",
+    "@zhixu/document-intelligence": "workspace:*",
+    "@zhixu/model-gateway": "workspace:*",
+    "@zhixu/skill-runtime": "workspace:*",
+    "fastify": "^5.6.2",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}

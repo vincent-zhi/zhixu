@@ -1,0 +1,28 @@
+{
+  "name": "@zhixu/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter @zhixu/core build && next build",
+    "dev": "next dev --port 3000",
+    "start": "next start --port 3000",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "pnpm --filter @zhixu/core build && tsc -p tsconfig.json --noEmit",
+    "lint": "pnpm typecheck"
+  },
+  "dependencies": {
+    "@zhixu/core": "workspace:*",
+    "next": "^16.0.7",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}

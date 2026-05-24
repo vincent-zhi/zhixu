@@ -1,0 +1,373 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkspaceType {
+  personal
+  team
+  lab
+  course
+  organization
+}
+
+enum ProjectStatus {
+  captured
+  understanding
+  planned
+  preparing
+  waiting_user
+  executing
+  verifying
+  ready_to_deliver
+  tracking
+  completed
+  archived
+  risk
+  failed
+}
+
+enum RiskLevel {
+  L0
+  L1
+  L2
+  L3
+}
+
+enum ResponsibilityColor {
+  green
+  yellow
+  gray
+}
+
+enum VerificationStatus {
+  unverified
+  pending
+  verified
+  rejected
+}
+
+model User {
+  id              String      @id @default(cuid())
+  name            String
+  email           String      @unique
+  role            String      @default("user")
+  timezone        String      @default("Asia/Shanghai")
+  locale          String      @default("zh-CN")
+  ownedWorkspaces Workspace[] @relation("WorkspaceOwner")
+  projects        Project[]   @relation("ProjectOwner")
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model Workspace {
+  id        String        @id @default(cuid())
+  name      String
+  type      WorkspaceType @default(personal)
+  ownerId   String
+  owner     User          @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  settings  Json          @default("{}")
+  projects  Project[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model Project {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id])
+  ownerId       String
+  owner         User          @relation("ProjectOwner", fields: [ownerId], references: [id])
+  title         String
+  type          String
+  description   String?
+  dueDate       DateTime?
+  priority      Int           @default(3)
+  status        ProjectStatus @default(captured)
+  currentState  Json          @default("{}")
+  privacyMode   String        @default("cloud")
+  riskLevel     RiskLevel     @default(L1)
+  sources       Source[]
+  tasks         Task[]
+  artifacts     Artifact[]
+  evidence      Evidence[]
+  humanGates    HumanGate[]
+  auditLogs     AuditLog[]
+  citations     CitationRecord[]
+  versions      Version[]
+  capsules      KnowledgeCapsule[]
+  skillInvocations SkillInvocation[]
+  mentorFeedback  MentorFeedback[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([workspaceId])
+  @@index([ownerId])
+  @@index([status])
+}
+
+model Source {
+  id               String    @id @default(cuid())
+  projectId        String
+  project          Project   @relation(fields: [projectId], references: [id])
+  uploadedBy       String
+  fileName         String
+  fileType         String
+  storageUri       String
+  parseStatus      String    @default("queued")
+  ocrStatus        String    @default("pending")
+  indexStatus      String    @default("pending")
+  summary          String?
+  metadataJson     Json      @default("{}")
+  sensitivityLevel String    @default("normal")
+  evidence         Evidence[]
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Task {
+  id                  String        @id @default(cuid())
+  projectId           String
+  project             Project       @relation(fields: [projectId], references: [id])
+  parentTaskId         String?
+  parentTask           Task?         @relation("TaskChildren", fields: [parentTaskId], references: [id])
+  children             Task[]        @relation("TaskChildren")
+  title               String
+  description         String?
+  assigneeType        String        @default("human_ai")
+  responsibilityLabel String        @default("human_gate")
+  status              String        @default("captured")
+  priority            Int           @default(3)
+  dueAt               DateTime?
+  dependenciesJson    Json          @default("[]")
+  riskLevel           RiskLevel     @default(L1)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+}
+
+model Artifact {
+  id                    String          @id @default(cuid())
+  projectId             String
+  project               Project         @relation(fields: [projectId], references: [id])
+  type                  String
+  title                 String
+  structureJson         Json            @default("{}")
+  status                String          @default("draft")
+  exportStatus          String          @default("not_started")
+  responsibilitySummary Json            @default("{}")
+  evidenceCoverage      Float           @default(0)
+  blocks                ArtifactBlock[]
+  evidence              Evidence[]
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+}
+
+model ArtifactBlock {
+  id                  String               @id @default(cuid())
+  artifactId          String
+  artifact            Artifact             @relation(fields: [artifactId], references: [id])
+  parentBlockId        String?
+  parentBlock          ArtifactBlock?       @relation("ArtifactBlockChildren", fields: [parentBlockId], references: [id])
+  children             ArtifactBlock[]      @relation("ArtifactBlockChildren")
+  blockType            String
+  contentJson          Json                 @default("{}")
+  orderIndex           Int
+  responsibilityColor  ResponsibilityColor  @default(gray)
+  verificationStatus   VerificationStatus   @default(unverified)
+  evidence             Evidence[]
+  createdBy            String
+  updatedBy            String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+}
+
+model Evidence {
+  id                  String              @id @default(cuid())
+  projectId           String
+  project             Project             @relation(fields: [projectId], references: [id])
+  artifactId          String?
+  artifact            Artifact?           @relation(fields: [artifactId], references: [id])
+  blockId             String?
+  block               ArtifactBlock?      @relation(fields: [blockId], references: [id])
+  sourceId            String?
+  source              Source?             @relation(fields: [sourceId], references: [id])
+  evidenceType        String
+  pageNumber          Int?
+  textSpan            String?
+  boundingBox         Json?
+  url                 String?
+  quoteText           String?
+  confidence          Float               @default(0)
+  responsibilityColor ResponsibilityColor @default(gray)
+  verificationStatus  VerificationStatus  @default(unverified)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+}
+
+model HumanGate {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  gateType    String
+  reason      String
+  riskLevel   RiskLevel @default(L2)
+  status      String    @default("pending")
+  confirmedBy String?
+  confirmedAt DateTime?
+  auditLogs   AuditLog[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  projectId   String?
+  project     Project?   @relation(fields: [projectId], references: [id])
+  humanGateId String?
+  humanGate   HumanGate? @relation(fields: [humanGateId], references: [id])
+  actorId     String
+  action      String
+  targetType  String
+  targetId    String?
+  metadata    Json       @default("{}")
+  createdAt   DateTime   @default(now())
+}
+
+model CitationRecord {
+  id                String   @id @default(cuid())
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id])
+  artifactId        String?
+  blockId           String?
+  rawText           String
+  normalizedText    String
+  doi               String?
+  title             String?
+  authorsJson       Json     @default("[]")
+  year              Int?
+  venue             String?
+  sourceProvider    String?
+  verificationStatus String  @default("unverified")
+  matchedSourceId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+model Version {
+  id            String   @id @default(cuid())
+  entityType    String
+  entityId      String
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id])
+  snapshotJson  Json     @default("{}")
+  diffJson      Json?
+  createdBy     String
+  createdReason String   @default("")
+  createdAt     DateTime @default(now())
+
+  @@index([projectId])
+  @@index([entityType, entityId])
+}
+
+model KnowledgeCapsule {
+  id                    String   @id @default(cuid())
+  projectId             String
+  project               Project  @relation(fields: [projectId], references: [id])
+  workspaceId           String
+  ownerId               String
+  title                 String
+  capsuleType           String   @default("general")
+  summary               String
+  reusableStructureJson Json     @default("{}")
+  reusableTasksJson     Json     @default("[]")
+  keyEvidenceIds        Json     @default("[]")
+  privacyScope          String   @default("workspace")
+  reuseCount            Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([workspaceId])
+}
+
+model QuotaUsage {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  projectId   String?
+  quotaType   String
+  usedAmount  Float     @default(0)
+  limitAmount Float     @default(0)
+  resetAt     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, quotaType])
+  @@index([workspaceId])
+}
+
+model SkillInvocation {
+  id                String   @id @default(cuid())
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id])
+  skillId           String
+  triggeredBy       String
+  inputRef          Json     @default("{}")
+  outputRef         Json?
+  permissionGrantId String?
+  status            String   @default("pending")
+  costJson          Json     @default("{}")
+  durationMs        Int      @default(0)
+  errorCode         String?
+  traceId           String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([skillId])
+}
+
+model PermissionGrant {
+  id              String    @id @default(cuid())
+  userId          String
+  workspaceId     String
+  projectId       String?
+  skillId         String
+  permissionScope String
+  riskLevel       String    @default("L1")
+  expiresAt       DateTime?
+  grantedAt       DateTime  @default(now())
+  revokedAt       DateTime?
+
+  @@index([userId, skillId])
+  @@index([workspaceId])
+}
+
+model MentorFeedback {
+  id              String    @id @default(cuid())
+  projectId       String
+  project         Project   @relation(fields: [projectId], references: [id])
+  sourceType      String
+  sourceId        String?
+  rawContent      String
+  feedbackType    String    @default("general")
+  actionItems     Json      @default("[]")
+  bindingStatus   String    @default("unbound")
+  boundArtifactId String?
+  boundBlockId    String?
+  boundTaskId     String?
+  resolutionStatus String  @default("pending")
+  resolvedBy      String?
+  resolvedAt      DateTime?
+  mentorPreference Json    @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([projectId])
+  @@index([resolutionStatus])
+}

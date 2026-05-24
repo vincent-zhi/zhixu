@@ -1,0 +1,29 @@
+{
+  "name": "@zhixu/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.electron.json",
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "electron": "pnpm build && electron dist-electron/main.js",
+    "tauri:build": "tauri build",
+    "tauri:dev": "tauri dev",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "vite": "^7.2.7",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0",
+    "@types/node": "^24.10.1",
+    "electron": "^39.2.7",
+    "vitest": "^4.0.14"
+  }
+}

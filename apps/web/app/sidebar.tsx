@@ -1,28 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
 import {
   IconCapture,
   IconChat,
   IconClose,
   IconCompliance,
   IconKnowledge,
+  IconMaterials,
   IconMenu,
   IconProject,
+  IconSchedule,
   IconSettings,
   IconSkills,
   IconStudio,
   IconToday,
 } from "./icons";
+import { logout } from "./api-client";
+import { useOffline } from "./use-offline";
+
+interface UserInfo {
+  id: string;
+  email: string;
+  name: string;
+  educationStage?: string;
+  discipline?: string;
+}
 
 const NAV_ITEMS = [
   { href: "/", label: "AI 对话", helper: "任务入口", icon: IconChat },
   { href: "/today", label: "今日", helper: "指挥中心", icon: IconToday },
   { href: "/capture", label: "捕获", helper: "资料与任务", icon: IconCapture },
   { href: "/projects", label: "项目", helper: "推进状态", icon: IconProject },
+  { href: "/schedule", label: "日程", helper: "考试与安排", icon: IconSchedule },
   { href: "/studio", label: "产物", helper: "Canvas", icon: IconStudio },
+  { href: "/materials", label: "资料", helper: "素材管理", icon: IconMaterials },
   { href: "/knowledge", label: "知识", helper: "长期沉淀", icon: IconKnowledge },
   { href: "/compliance", label: "合规", helper: "溯源核验", icon: IconCompliance },
   { href: "/skills", label: "Skills", helper: "能力与权限", icon: IconSkills },
@@ -30,7 +44,28 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const { isOffline, pendingOps } = useOffline();
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("zhixu_user");
+      if (stored) setUser(JSON.parse(stored));
+    } catch {}
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const token = localStorage.getItem("zhixu_token");
+      if (token) await logout(token);
+    } catch {}
+    localStorage.removeItem("zhixu_token");
+    localStorage.removeItem("zhixu_user");
+    setUser(null);
+    router.push("/login");
+  };
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -87,14 +122,28 @@ export default function Sidebar() {
         </nav>
 
         <div className="sidebar-status">
-          <span className="status-dot" />
+          <span className={`status-dot ${isOffline ? "offline" : ""}`} />
           <div>
-            <strong>Agent 在线</strong>
-            <small>2 个后台任务运行中</small>
+            <strong>{isOffline ? "离线模式" : "Agent 在线"}</strong>
+            <small>
+              {isOffline
+                ? pendingOps > 0
+                  ? `${pendingOps} 个操作待同步`
+                  : "网络已断开"
+                : pendingOps > 0
+                  ? `${pendingOps} 个操作待同步`
+                  : "2 个后台任务运行中"}
+            </small>
           </div>
         </div>
 
         <div className="sidebar-new-footer">
+          {user && (
+            <div className="sidebar-user-info">
+              <div className="sidebar-user-name">{user.name}</div>
+              <div className="sidebar-user-email">{user.email}</div>
+            </div>
+          )}
           <Link
             href="/settings"
             className={`sidebar-new-item ${isActive("/settings") ? "sidebar-new-item-active" : ""}`}
@@ -106,6 +155,28 @@ export default function Sidebar() {
               <small>隐私、模型、权限</small>
             </span>
           </Link>
+          {user ? (
+            <button
+              className="sidebar-new-item sidebar-logout-btn"
+              onClick={handleLogout}
+            >
+              <IconClose />
+              <span className="sidebar-item-text">
+                <strong>登出</strong>
+                <small>退出当前账户</small>
+              </span>
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              className="sidebar-new-item"
+              onClick={() => setMobileOpen(false)}
+            >
+              <span className="sidebar-item-text">
+                <strong>登录</strong>
+              </span>
+            </Link>
+          )}
         </div>
       </aside>
     </>

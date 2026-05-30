@@ -1,4 +1,4 @@
-import type { Termbase, TermEntry } from "./types.js";
+import type { Termbase, TermEntry, LLMCallable } from "./types.js";
 
 export class TermbaseManager {
   createTermbase(workspaceId: string): Termbase {
@@ -57,6 +57,24 @@ export class TermbaseManager {
       ].join(",")
     );
     return [header, ...rows].join("\n");
+  }
+
+  async extractTerms(
+    content: string,
+    llm: LLMCallable
+  ): Promise<Array<{ term: string; aliases: string[]; definition: string; context: string }>> {
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术术语提取助手。从文档中提取学术术语，包括中英文对照、缩写和同义词。
+返回 JSON 数组：[{"term": "术语", "aliases": ["别名1", "缩写1"], "definition": "定义", "context": "出现的上下文"}]`,
+        messages: [{ role: "user", content: content.slice(0, 4000) }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return Array.isArray(parsed) ? parsed : parsed.terms ?? [];
+    } catch {
+      return [];
+    }
   }
 }
 

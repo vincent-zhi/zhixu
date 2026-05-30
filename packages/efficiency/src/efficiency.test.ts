@@ -5,7 +5,7 @@ import { CrossProjectLinker } from "./cross-project.js";
 import { StyleUnifier } from "./style-unifier.js";
 import { FormatConverter } from "./format-converter.js";
 import { ContentDeduplicator } from "./deduplicator.js";
-import type { Termbase, FragmentNote, StyleProfile, CrossProjectLink } from "./types.js";
+import type { Termbase, FragmentNote, StyleProfile, CrossProjectLink, LLMCallable } from "./types.js";
 
 describe("TermbaseManager", () => {
   const manager = new TermbaseManager();
@@ -377,5 +377,112 @@ describe("ContentDeduplicator", () => {
     );
     expect(result.outputCount).toBe(3);
     expect(result.duplicates).toEqual([]);
+  });
+});
+
+// --- LLM-Enhanced Method Tests ---
+
+const mockLLM: LLMCallable = {
+  async chat() {
+    return {
+      content: JSON.stringify({
+        unified: "This is the unified academic text.",
+        changes: [{ original: "original text", replacement: "unified text", reason: "style improvement" }],
+        links: [
+          { source: "p1", target: "p2", type: "shared_methodology", rationale: "Both use NLP techniques", sharedKnowledge: ["tokenization", "embedding"] },
+        ],
+        terms: [
+          { term: "Machine Learning", aliases: ["ML"], definition: "A subset of AI", context: "Used throughout the paper" },
+        ],
+        questions: [
+          { category: "methodology", question: "Why this method?", expectedPoints: ["justification"], difficulty: 0.5 },
+        ],
+      }),
+    };
+  },
+};
+
+describe("StyleUnifier LLM enhanced", () => {
+  it("unifyStyleEnhanced returns LLM result", async () => {
+    const unifier = new StyleUnifier();
+    const profile: StyleProfile = {
+      id: "sp-1",
+      userId: "u1",
+      academicLevel: "phd",
+      domain: "CS",
+      preferences: {
+        formalityLevel: 4,
+        citationStyle: "APA",
+        preferredTense: "present",
+        avoidFirstPerson: true,
+        sentenceLengthPreference: "medium",
+      },
+    };
+    const result = await unifier.unifyStyleEnhanced("I think this is correct.", profile, mockLLM);
+    expect(result.unified).toBe("This is the unified academic text.");
+    expect(result.changes.length).toBeGreaterThan(0);
+  });
+
+  it("unifyStyleEnhanced falls back on LLM error", async () => {
+    const unifier = new StyleUnifier();
+    const profile: StyleProfile = {
+      id: "sp-1",
+      userId: "u1",
+      academicLevel: "phd",
+      domain: "CS",
+      preferences: {
+        formalityLevel: 4,
+        citationStyle: "APA",
+        preferredTense: "present",
+        avoidFirstPerson: true,
+        sentenceLengthPreference: "medium",
+      },
+    };
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await unifier.unifyStyleEnhanced("I think this is correct.", profile, badLLM);
+    expect(result.unified).toBeTruthy();
+    expect(result.changes).toEqual([]);
+  });
+});
+
+describe("CrossProjectLinker LLM enhanced", () => {
+  it("suggestLinksEnhanced returns LLM links", async () => {
+    const linker = new CrossProjectLinker();
+    const projects = [
+      { id: "p1", title: "Deep Learning for NLP", type: "research", summary: "NLP with deep learning" },
+      { id: "p2", title: "Deep Learning for Vision", type: "research", summary: "Vision with deep learning" },
+    ];
+    const result = await linker.suggestLinksEnhanced(projects, mockLLM);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0]!.rationale).toBeTruthy();
+  });
+
+  it("suggestLinksEnhanced falls back on LLM error", async () => {
+    const linker = new CrossProjectLinker();
+    const projects = [
+      { id: "p1", title: "Deep Learning for NLP", type: "research", summary: "NLP" },
+      { id: "p2", title: "Deep Learning for Vision", type: "research", summary: "Vision" },
+    ];
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await linker.suggestLinksEnhanced(projects, badLLM);
+    // Should fall back to basic heuristic links
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+describe("TermbaseManager LLM enhanced", () => {
+  it("extractTerms returns LLM-extracted terms", async () => {
+    const manager = new TermbaseManager();
+    const result = await manager.extractTerms("Machine learning (ML) is a subset of artificial intelligence.", mockLLM);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0]!.term).toBe("Machine Learning");
+    expect(result[0]!.aliases).toContain("ML");
+  });
+
+  it("extractTerms returns empty array on LLM error", async () => {
+    const manager = new TermbaseManager();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await manager.extractTerms("test content", badLLM);
+    expect(result).toEqual([]);
   });
 });

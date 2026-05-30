@@ -1,4 +1,4 @@
-import type { CrossProjectLink } from "./types.js";
+import type { CrossProjectLink, LLMCallable } from "./types.js";
 
 export class CrossProjectLinker {
   createLink(input: {
@@ -82,6 +82,39 @@ export class CrossProjectLinker {
     }
 
     return suggestions;
+  }
+
+  async suggestLinksEnhanced(
+    projects: Array<{ id: string; title: string; type: string; summary: string }>,
+    llm: LLMCallable
+  ): Promise<Array<CrossProjectLink & { rationale: string; sharedKnowledge: string[] }>> {
+    // Collect basic links by iterating all projects
+    const basicLinks: CrossProjectLink[] = [];
+    for (const project of projects) {
+      basicLinks.push(...this.suggestLinks(project.id, projects));
+    }
+
+    try {
+      const result = await llm.chat({
+        system: `你是一位跨项目知识关联助手。分析多个项目之间的知识关联。
+返回 JSON：{"links": [{"source": "项目ID1", "target": "项目ID2", "type": "shared_methodology|shared_knowledge|shared_data", "rationale": "关联原因", "sharedKnowledge": ["共享知识点1", "..."]}]}`,
+        messages: [{ role: "user", content: projects.map(p => `ID:${p.id} | ${p.title}（${p.type}）：${p.summary}`).join("\n") }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return (parsed.links ?? []).map((l: any) => ({
+        id: crypto.randomUUID(),
+        sourceProjectId: l.source ?? "",
+        targetProjectId: l.target ?? "",
+        linkType: l.type ?? "shared_knowledge",
+        description: l.rationale ?? "",
+        createdAt: new Date().toISOString(),
+        rationale: l.rationale ?? "",
+        sharedKnowledge: l.sharedKnowledge ?? [],
+      }));
+    } catch {
+      return basicLinks.map(l => ({ ...l, rationale: "", sharedKnowledge: [] }));
+    }
   }
 }
 

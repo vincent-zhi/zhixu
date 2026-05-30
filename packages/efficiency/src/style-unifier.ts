@@ -1,4 +1,4 @@
-import type { StyleProfile } from "./types.js";
+import type { StyleProfile, LLMCallable } from "./types.js";
 
 export class StyleUnifier {
   createProfile(input: Omit<StyleProfile, "id">): StyleProfile {
@@ -147,5 +147,27 @@ export class StyleUnifier {
     }
 
     return issues;
+  }
+
+  async unifyStyleEnhanced(
+    text: string,
+    profile: StyleProfile,
+    llm: LLMCallable
+  ): Promise<{ unified: string; changes: Array<{ original: string; replacement: string; reason: string }> }> {
+    const basic = this.unifyStyle(text, profile);
+    try {
+      const person = profile.preferences.avoidFirstPerson ? "第三人称" : "第一人称";
+      const tense = profile.preferences.preferredTense === "present" ? "现在时" : "过去时";
+      const result = await llm.chat({
+        system: `你是一位学术写作助手。将文本统一为正式学术风格（${person}，${tense}，正式度${profile.preferences.formalityLevel}/5）。
+返回 JSON：{"unified": "统一后的文本", "changes": [{"original": "原文片段", "replacement": "修改后", "reason": "修改原因"}]}`,
+        messages: [{ role: "user", content: text }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return { unified: parsed.unified ?? basic, changes: parsed.changes ?? [] };
+    } catch {
+      return { unified: basic, changes: [] };
+    }
   }
 }

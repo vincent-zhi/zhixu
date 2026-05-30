@@ -79,6 +79,105 @@ describe("ProjectSharingManager", () => {
   it("returns false for revoking non-existent share", () => {
     expect(manager.revokeShare("nonexistent")).toBe(false);
   });
+
+  it("getShare retrieves a share by id", () => {
+    const share = manager.createShare({
+      projectId: "p1",
+      sharedBy: "user-1",
+      shareType: "read_only",
+      recipientIds: ["user-2"],
+    });
+    const found = manager.getShare(share.id);
+    expect(found).toBeDefined();
+    expect(found!.id).toBe(share.id);
+  });
+
+  it("getShare returns undefined for non-existent id", () => {
+    expect(manager.getShare("nonexistent")).toBeUndefined();
+  });
+
+  it("listSharesByProject returns shares for a given project", () => {
+    const s1 = manager.createShare({
+      projectId: "p-list",
+      sharedBy: "user-1",
+      shareType: "read_only",
+      recipientIds: ["user-2"],
+    });
+    manager.createShare({
+      projectId: "other-project",
+      sharedBy: "user-1",
+      shareType: "edit",
+      recipientIds: ["user-3"],
+    });
+    const results = manager.listSharesByProject("p-list");
+    expect(results.some((s) => s.id === s1.id)).toBe(true);
+    expect(results.every((s) => s.projectId === "p-list")).toBe(true);
+  });
+
+  it("listSharesByUser returns shares where user is recipient or sharer", () => {
+    const s1 = manager.createShare({
+      projectId: "p-user",
+      sharedBy: "user-1",
+      shareType: "read_only",
+      recipientIds: ["user-2"],
+    });
+    const results = manager.listSharesByUser("user-2");
+    expect(results.some((s) => s.id === s1.id)).toBe(true);
+  });
+
+  it("listSharesByUser includes shares created by the user", () => {
+    const s1 = manager.createShare({
+      projectId: "p-owner",
+      sharedBy: "owner-1",
+      shareType: "edit",
+      recipientIds: ["user-2"],
+    });
+    const results = manager.listSharesByUser("owner-1");
+    expect(results.some((s) => s.id === s1.id)).toBe(true);
+  });
+
+  it("checkAccess grants access to the share creator", () => {
+    const share = manager.createShare({
+      projectId: "p1",
+      sharedBy: "creator-1",
+      shareType: "read_only",
+      recipientIds: ["user-2"],
+    });
+    expect(manager.checkAccess(share.id, "creator-1")).toBe(true);
+  });
+
+  it("checkProjectAccess returns the share when user has valid access", () => {
+    const share = manager.createShare({
+      projectId: "p-check",
+      sharedBy: "user-1",
+      shareType: "comment",
+      recipientIds: ["user-2"],
+    });
+    const result = manager.checkProjectAccess("p-check", "user-2");
+    expect(result).toBeDefined();
+    expect(result!.id).toBe(share.id);
+  });
+
+  it("checkProjectAccess returns undefined for expired shares", () => {
+    manager.createShare({
+      projectId: "p-expired",
+      sharedBy: "user-1",
+      shareType: "read_only",
+      recipientIds: ["user-2"],
+      expiresAt: "2020-01-01",
+    });
+    expect(manager.checkProjectAccess("p-expired", "user-2")).toBeUndefined();
+  });
+
+  it("checkProjectAccess returns undefined when user has no access", () => {
+    manager.createShare({
+      projectId: "p-no-access",
+      sharedBy: "user-1",
+      shareType: "read_only",
+      recipientIds: ["user-2"],
+    });
+    expect(manager.checkProjectAccess("p-no-access", "user-99")).toBeUndefined();
+  });
 });
 
 describe("SharedKnowledgebaseManager", () => {

@@ -5,7 +5,8 @@ export class ExportPipeline {
   constructor(
     private readonly pptxRenderer: ArtifactRenderer<PptExportInput>,
     private readonly docxRenderer: ArtifactRenderer<DocExportInput>,
-    private readonly markdownRenderer: ArtifactRenderer<DocExportInput>
+    private readonly markdownRenderer: ArtifactRenderer<DocExportInput>,
+    private readonly pdfRenderer: ArtifactRenderer<DocExportInput>
   ) {}
 
   async exportPptx(input: PptExportInput): Promise<ExportResult> {
@@ -18,5 +19,9 @@ export class ExportPipeline {
 
   async exportMarkdown(input: DocExportInput): Promise<ExportResult> {
     return this.markdownRenderer.render(input);
+  }
+
+  async exportPdf(input: DocExportInput): Promise<ExportResult> {
+    return this.pdfRenderer.render(input);
   }
 }

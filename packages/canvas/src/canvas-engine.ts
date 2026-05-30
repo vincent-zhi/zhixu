@@ -182,11 +182,76 @@ export class CanvasEngine {
     return comment;
   }
 
+  getBlock(doc: CanvasDocument, blockId: string): CanvasBlock | undefined {
+    return doc.blocks.find((b) => b.id === blockId);
+  }
+
+  getBlocksByType(doc: CanvasDocument, blockType: CanvasBlock["blockType"]): CanvasBlock[] {
+    return doc.blocks
+      .filter((b) => b.blockType === blockType)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+  }
+
+  unbindEvidence(doc: CanvasDocument, blockId: string, evidenceId: string): boolean {
+    const block = doc.blocks.find((b) => b.id === blockId);
+    if (!block) return false;
+
+    const idx = block.evidenceRefs.indexOf(evidenceId);
+    if (idx === -1) return false;
+
+    block.evidenceRefs.splice(idx, 1);
+    block.updatedAt = new Date().toISOString();
+    doc.updatedAt = block.updatedAt;
+    return true;
+  }
+
+  duplicateBlock(doc: CanvasDocument, blockId: string): CanvasBlock | null {
+    const source = doc.blocks.find((b) => b.id === blockId);
+    if (!source) return null;
+
+    const now = new Date().toISOString();
+    const duplicate: CanvasBlock = {
+      ...source,
+      id: crypto.randomUUID(),
+      comments: [],
+      versionId: null,
+      orderIndex: source.orderIndex + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    for (const existing of doc.blocks) {
+      if (existing.orderIndex > source.orderIndex) {
+        existing.orderIndex++;
+      }
+    }
+
+    const sourceIdx = doc.blocks.indexOf(source);
+    doc.blocks.splice(sourceIdx + 1, 0, duplicate);
+
+    doc.outline = this.buildOutline(doc);
+    doc.updatedAt = now;
+    return duplicate;
+  }
+
   resolveComment(doc: CanvasDocument, commentId: string): boolean {
     for (const block of doc.blocks) {
       const comment = block.comments.find((c) => c.id === commentId);
       if (comment) {
         comment.resolved = true;
+        block.updatedAt = new Date().toISOString();
+        doc.updatedAt = block.updatedAt;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  deleteComment(doc: CanvasDocument, commentId: string): boolean {
+    for (const block of doc.blocks) {
+      const idx = block.comments.findIndex((c) => c.id === commentId);
+      if (idx !== -1) {
+        block.comments.splice(idx, 1);
         block.updatedAt = new Date().toISOString();
         doc.updatedAt = block.updatedAt;
         return true;

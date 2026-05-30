@@ -12,10 +12,12 @@ export async function registerDomainRoutes(
   const { registerResearchRoutes } = await import("./routes/research.js");
   const { registerUndergradRoutes } = await import("./routes/undergrad.js");
   const { registerEfficiencyRoutes } = await import("./routes/efficiency.js");
+  const { registerSenseNovaRoutes } = await import("./routes/sensenova.js");
 
   await registerCoachingRoutes(fastify, store, gateway);
   await registerGradRoutes(fastify, store, gateway);
   await registerResearchRoutes(fastify, store, gateway);
   await registerUndergradRoutes(fastify, store, gateway);
   await registerEfficiencyRoutes(fastify, store, gateway);
+  await registerSenseNovaRoutes(fastify);
 }

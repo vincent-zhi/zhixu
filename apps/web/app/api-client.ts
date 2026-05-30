@@ -1342,3 +1342,37 @@ export async function efficiencyFormatConvert(projectId: string, input: { conten
     `/api/projects/${projectId}/efficiency/format-convert`, { method: "POST", body: JSON.stringify(input) }
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// SenseNova Integration (image generation, recognition, skills)
+// ─────────────────────────────────────────────────────────────
+
+export async function sensenovaListSkills() {
+  return request<{ skills: Array<{ name: string; description: string }>; count: number }>(
+    "/api/sensenova/skills"
+  );
+}
+
+export async function sensenovaGetSkill(skillName: string) {
+  return request<{ name: string; description: string; body: string; skillDir: string }>(
+    `/api/sensenova/skills/${skillName}`
+  );
+}
+
+export async function sensenovaGenerateImage(input: { prompt: string; size?: string; aspectRatio?: string; negativePrompt?: string; seed?: number }) {
+  return request<{ imageUrl: string }>(
+    "/api/sensenova/image/generate", { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function sensenovaRecognizeImage(input: { imageUrl: string; prompt?: string }) {
+  return request<{ description: string }>(
+    "/api/sensenova/image/recognize", { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function sensenovaImageSizes() {
+  return request<{ sizes: Record<string, string> }>(
+    "/api/sensenova/image/sizes"
+  );
+}

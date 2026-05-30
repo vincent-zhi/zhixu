@@ -1,8 +1,19 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
-import { IconSettings, IconPrivacy, IconMemory, IconKey, IconDatabase, IconBell, IconModel } from "../icons";
+import {
+  IconPrivacy,
+  IconMemory,
+  IconKey,
+  IconDatabase,
+  IconBell,
+  IconModel,
+  IconDownload,
+  IconTrash,
+  IconRefresh,
+  IconEye,
+  IconEyeOff,
+} from "../icons";
 import {
   listProjects,
   listCapsules,
@@ -103,6 +114,50 @@ function formatDate(iso: string): string {
     month: "2-digit",
     day: "2-digit",
   });
+}
+
+function SkeletonBlock({ width, height }: { width: string; height: string }) {
+  return (
+    <div
+      className="skeleton-block"
+      style={{ width, height }}
+    />
+  );
+}
+
+function SettingsSkeleton() {
+  return (
+    <div className="settings-shell">
+      <header className="settings-header">
+        <p className="eyebrow">Settings & Privacy</p>
+        <h1>设置与隐私</h1>
+      </header>
+      <div className="settings-layout">
+        <nav className="settings-sidebar" aria-label="设置导航">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="skeleton-nav-item">
+              <SkeletonBlock width="16px" height="16px" />
+              <SkeletonBlock width="64px" height="14px" />
+            </div>
+          ))}
+        </nav>
+        <div className="settings-content">
+          <div className="settings-section">
+            <SkeletonBlock width="120px" height="24px" />
+            <div style={{ height: 12 }} />
+            <SkeletonBlock width="100%" height="16px" />
+            <SkeletonBlock width="80%" height="16px" />
+            <div style={{ height: 20 }} />
+            <SkeletonBlock width="100%" height="80px" />
+            <div style={{ height: 12 }} />
+            <SkeletonBlock width="100%" height="80px" />
+            <div style={{ height: 12 }} />
+            <SkeletonBlock width="100%" height="80px" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function SettingsPage() {
@@ -206,7 +261,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <main className="shell">
-        <div className="page-loading">加载设置中…</div>
+        <SettingsSkeleton />
       </main>
     );
   }
@@ -225,8 +280,6 @@ export default function SettingsPage() {
 
   return (
     <main className="shell">
-      <Link href="/" className="back-link">← 返回首页</Link>
-
       <div className="settings-shell">
         <header className="settings-header">
           <p className="eyebrow">Settings & Privacy</p>
@@ -242,7 +295,8 @@ export default function SettingsPage() {
                 onClick={() => setActiveSection(item.key)}
               >
                 <span className="settings-nav-icon">{item.icon}</span>
-                <span>{item.label}</span>
+                <span className="settings-nav-label">{item.label}</span>
+                {activeSection === item.key && <span className="settings-nav-indicator" />}
               </button>
             ))}
           </nav>
@@ -465,16 +519,26 @@ export default function SettingsPage() {
 
                 <div className="data-actions">
                   <div className="data-action-card">
-                    <h3>导出数据</h3>
-                    <p>将你的所有设置、知识胶囊和记忆候选导出为 JSON 文件。</p>
+                    <div className="data-action-icon">
+                      <IconDownload size={20} />
+                    </div>
+                    <div className="data-action-body">
+                      <h3>导出数据</h3>
+                      <p>将你的所有设置、知识胶囊和记忆候选导出为 JSON 文件。</p>
+                    </div>
                     <button className="btn-primary" onClick={handleExportData}>
                       导出全部数据
                     </button>
                   </div>
 
                   <div className="data-action-card data-action-danger">
-                    <h3>删除数据</h3>
-                    <p>删除你的所有本地设置和缓存数据。此操作不可逆，服务器端数据需要联系管理员删除。</p>
+                    <div className="data-action-icon data-action-icon-danger">
+                      <IconTrash size={20} />
+                    </div>
+                    <div className="data-action-body">
+                      <h3>删除数据</h3>
+                      <p>删除你的所有本地设置和缓存数据。此操作不可逆，服务器端数据需要联系管理员删除。</p>
+                    </div>
                     <button
                       className="btn-danger"
                       onClick={() => {
@@ -489,11 +553,16 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="data-action-card">
-                    <h3>同步状态</h3>
-                    <p>本地设置已保存至浏览器存储。知识胶囊和记忆数据存储在服务器端，随项目自动同步。</p>
-                    <div className="sync-status">
-                      <span className="sync-dot" />
-                      <span>本地存储正常</span>
+                    <div className="data-action-icon data-action-icon-sync">
+                      <IconRefresh size={20} />
+                    </div>
+                    <div className="data-action-body">
+                      <h3>同步状态</h3>
+                      <p>本地设置已保存至浏览器存储。知识胶囊和记忆数据存储在服务器端，随项目自动同步。</p>
+                      <div className="sync-status">
+                        <span className="sync-dot" />
+                        <span>本地存储正常</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -577,7 +646,7 @@ export default function SettingsPage() {
               <section className="settings-section">
                 <h2>模型设置</h2>
                 <p className="settings-explanation">
-                  配置知序连接的 AI 大语言模型。支持所有 OpenAI 兼容接口，包括阿里云百炼、DeepSeek、OpenAI 等。
+                  配置知序连接的 AI 大语言模型。支持所有 OpenAI 兼容接口，包括阿里云百炼、DeepSeek、OpenAI、商汤 SenseNova 等。
                   配置完成后，所有 AI 对话、Agent 调度和 Skill 执行将使用此模型。
                 </p>
 
@@ -645,7 +714,7 @@ export default function SettingsPage() {
                         className="btn-secondary btn-sm llm-toggle-visibility"
                         onClick={() => setShowApiKey((v) => !v)}
                       >
-                        {showApiKey ? "隐藏" : "显示"}
+                        {showApiKey ? <IconEyeOff size={14} /> : <IconEye size={14} />}
                       </button>
                     </div>
                     <p className="form-hint">你的 API Key 仅存储在服务器内存中，不会写入磁盘或日志。</p>
@@ -662,7 +731,7 @@ export default function SettingsPage() {
                       onChange={(e) => setLLMForm((f) => ({ ...f, baseURL: e.target.value }))}
                     />
                     <p className="form-hint">
-                      OpenAI 兼容接口地址。阿里云百炼：https://dashscope.aliyuncs.com/compatible-mode/v1
+                      OpenAI 兼容接口地址。阿里云百炼：https://dashscope.aliyuncs.com/compatible-mode/v1；商汤 SenseNova：https://token.sensenova.cn/v1
                     </p>
                   </div>
 
@@ -677,7 +746,7 @@ export default function SettingsPage() {
                       onChange={(e) => setLLMForm((f) => ({ ...f, model: e.target.value }))}
                     />
                     <p className="form-hint">
-                      模型标识符。阿里云百炼推荐：qwen-plus、qwen-max、qwen-turbo
+                      模型标识符。阿里云百炼推荐：qwen-plus、qwen-max；商汤 SenseNova 推荐：sensenova-6.7-flash-lite
                     </p>
                   </div>
 
@@ -773,44 +842,70 @@ export default function SettingsPage() {
                   <h3>常用配置预设</h3>
                   <div className="llm-preset-list">
                     <button
-                      className="btn-secondary btn-sm"
+                      className="llm-preset-card"
                       onClick={() => setLLMForm((f) => ({
                         ...f,
                         baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
                         model: "qwen-plus",
                       }))}
                     >
-                      阿里云百炼 · qwen-plus
+                      <span className="llm-preset-provider">阿里云百炼</span>
+                      <span className="llm-preset-model">qwen-plus</span>
                     </button>
                     <button
-                      className="btn-secondary btn-sm"
+                      className="llm-preset-card"
                       onClick={() => setLLMForm((f) => ({
                         ...f,
                         baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
                         model: "qwen-max",
                       }))}
                     >
-                      阿里云百炼 · qwen-max
+                      <span className="llm-preset-provider">阿里云百炼</span>
+                      <span className="llm-preset-model">qwen-max</span>
                     </button>
                     <button
-                      className="btn-secondary btn-sm"
+                      className="llm-preset-card"
                       onClick={() => setLLMForm((f) => ({
                         ...f,
                         baseURL: "https://api.deepseek.com/v1",
                         model: "deepseek-chat",
                       }))}
                     >
-                      DeepSeek · deepseek-chat
+                      <span className="llm-preset-provider">DeepSeek</span>
+                      <span className="llm-preset-model">deepseek-chat</span>
                     </button>
                     <button
-                      className="btn-secondary btn-sm"
+                      className="llm-preset-card"
                       onClick={() => setLLMForm((f) => ({
                         ...f,
                         baseURL: "https://api.openai.com/v1",
                         model: "gpt-4o",
                       }))}
                     >
-                      OpenAI · gpt-4o
+                      <span className="llm-preset-provider">OpenAI</span>
+                      <span className="llm-preset-model">gpt-4o</span>
+                    </button>
+                    <button
+                      className="llm-preset-card"
+                      onClick={() => setLLMForm((f) => ({
+                        ...f,
+                        baseURL: "https://token.sensenova.cn/v1",
+                        model: "sensenova-6.7-flash-lite",
+                      }))}
+                    >
+                      <span className="llm-preset-provider">商汤 SenseNova</span>
+                      <span className="llm-preset-model">6.7 Flash-Lite（免费）</span>
+                    </button>
+                    <button
+                      className="llm-preset-card"
+                      onClick={() => setLLMForm((f) => ({
+                        ...f,
+                        baseURL: "https://token.sensenova.cn/v1",
+                        model: "deepseek-v4-flash",
+                      }))}
+                    >
+                      <span className="llm-preset-provider">商汤 SenseNova</span>
+                      <span className="llm-preset-model">DeepSeek V4 Flash（免费）</span>
                     </button>
                   </div>
                 </div>

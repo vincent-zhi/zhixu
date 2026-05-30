@@ -1,4 +1,4 @@
-import type { ExamCrashPlan, HighFrequencyTopic, CrashDayPlan } from "./types.js";
+import type { ExamCrashPlan, HighFrequencyTopic, CrashDayPlan, LLMCallable } from "./types.js";
 
 export class ExamCrashPlanner {
   createCrashPlan(input: {
@@ -110,5 +110,33 @@ export class ExamCrashPlanner {
     }
 
     return topics.sort((a, b) => b.estimatedWeight - a.estimatedWeight).slice(0, 20);
+  }
+
+  async extractTopicsEnhanced(
+    sources: string[],
+    pastExams: string[],
+    llm: LLMCallable
+  ): Promise<HighFrequencyTopic[]> {
+    const sourceObjects = sources.map((content, i) => ({ id: `source-${i}`, content }));
+    const basic = this.extractHighFrequencyTopics(sourceObjects);
+    try {
+      const combined = [...sources, ...pastExams].join("\n---\n").slice(0, 6000);
+      const result = await llm.chat({
+        system: `你是一位考试辅导助手。从课程资料和往年题中提取高频考点（知识单元，不是单词）。
+返回 JSON 数组：[{"term": "考点名称", "frequency": 出现次数, "weight": 0.0-1.0, "relatedTopics": ["关联考点"]}]`,
+        messages: [{ role: "user", content: combined }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      const topics: HighFrequencyTopic[] = (Array.isArray(parsed) ? parsed : parsed.topics ?? []).map((t: any) => ({
+        topic: t.term ?? "",
+        sourceIds: [],
+        frequency: t.frequency ?? 1,
+        estimatedWeight: t.weight ?? 0.5,
+      }));
+      return topics.length > 0 ? topics : basic;
+    } catch {
+      return basic;
+    }
   }
 }

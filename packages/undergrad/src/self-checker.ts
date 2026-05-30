@@ -1,4 +1,4 @@
-import type { SelfCheckResult, SelfCheckIssue } from "./types.js";
+import type { SelfCheckResult, SelfCheckIssue, LLMCallable } from "./types.js";
 
 const COLLOQUIAL_PATTERNS = [
   /\b(我觉得|我觉得吧|反正|就是|然后|那个|这个|怎么说呢|其实吧|说白了)\b/g,
@@ -149,5 +149,25 @@ export class SelfChecker {
       issues,
       overallScore,
     };
+  }
+
+  async checkArtifactEnhanced(
+    content: string,
+    options: { minWords?: number; maxWords?: number; requiredSections?: string[] },
+    llm: LLMCallable
+  ): Promise<SelfCheckResult & { aiFeedback: Array<{ section: string; issue: string; suggestion: string }> }> {
+    const basic = this.checkArtifact({ content, requirements: options });
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术写作质量检查助手。检查文档的逻辑连贯性、论证充分性和主题匹配度。
+返回 JSON：{"feedback": [{"section": "段落/章节名", "issue": "问题描述", "suggestion": "改进建议"}]}`,
+        messages: [{ role: "user", content: `请检查以下文档：\n\n${content.slice(0, 4000)}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return { ...basic, aiFeedback: parsed.feedback ?? [] };
+    } catch {
+      return { ...basic, aiFeedback: [] };
+    }
   }
 }

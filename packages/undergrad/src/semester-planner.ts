@@ -1,4 +1,4 @@
-import type { SemesterPlan, CourseEntry, ExamEntry, AssignmentEntry, WeeklyPlan } from "./types.js";
+import type { SemesterPlan, CourseEntry, ExamEntry, AssignmentEntry, WeeklyPlan, LLMCallable } from "./types.js";
 
 export class SemesterPlanner {
   createPlan(input: {
@@ -124,5 +124,33 @@ export class SemesterPlanner {
     }
 
     return adjusted;
+  }
+
+  async createPlanEnhanced(
+    courses: CourseEntry[],
+    semesterStart: string,
+    semesterEnd: string,
+    llm: LLMCallable
+  ): Promise<SemesterPlan & { aiStrategy: string; aiTips: string[] }> {
+    const basic = this.createPlan({
+      semesterName: "Semester",
+      startDate: semesterStart,
+      endDate: semesterEnd,
+      courses,
+      exams: [],
+      assignments: [],
+    });
+    try {
+      const result = await llm.chat({
+        system: `你是一位大学学业规划助手。根据课程信息生成个性化学期学习策略。
+返回 JSON：{"strategy": "总体策略描述", "tips": ["第1周建议：...", "第2周建议：...", ...]}`,
+        messages: [{ role: "user", content: `课程列表：\n${courses.map(c => `${c.name}（${c.credits}学分，难度${c.difficulty}/5，考核：${c.assessmentType}）`).join("\n")}\n学期：${semesterStart} ~ ${semesterEnd}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return { ...basic, aiStrategy: parsed.strategy ?? "", aiTips: parsed.tips ?? [] };
+    } catch {
+      return { ...basic, aiStrategy: "", aiTips: [] };
+    }
   }
 }

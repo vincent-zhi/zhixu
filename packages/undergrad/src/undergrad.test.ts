@@ -5,7 +5,7 @@ import { ClassNotesProcessor } from "./class-notes-processor.js";
 import { SelfChecker } from "./self-checker.js";
 import { ExamCrashPlanner } from "./exam-crash.js";
 import { PPTBeautifier } from "./ppt-beautifier.js";
-import type { CourseEntry, ExamEntry, AssignmentEntry, GroupMember } from "./types.js";
+import type { CourseEntry, ExamEntry, AssignmentEntry, GroupMember, LLMCallable } from "./types.js";
 
 describe("SemesterPlanner", () => {
   const planner = new SemesterPlanner();
@@ -319,5 +319,122 @@ describe("PPTBeautifier", () => {
 
     const issues = beautifier.analyze(slides);
     expect(issues.filter((i) => i.type === "text_overload")).toHaveLength(0);
+  });
+});
+
+// --- LLM-Enhanced Method Tests ---
+
+const mockLLM: LLMCallable = {
+  async chat() {
+    return {
+      content: JSON.stringify({
+        strategy: "Focus on high-credit courses first",
+        tips: ["Week 1: Review fundamentals", "Week 2: Start assignments early"],
+        summary: "Course covered recursion and sorting",
+        examHints: ["Know the difference between merge sort and quicksort"],
+        keyConcepts: ["Recursion", "Base case", "Divide and conquer"],
+        feedback: [{ section: "Introduction", issue: "Too brief", suggestion: "Expand the intro" }],
+        topics: [
+          { term: "Recursion", frequency: 5, weight: 0.8, relatedTopics: ["Base case"] },
+        ],
+      }),
+    };
+  },
+};
+
+describe("SemesterPlanner LLM enhanced", () => {
+  it("createPlanEnhanced returns LLM strategy", async () => {
+    const planner = new SemesterPlanner();
+    const courses: CourseEntry[] = [
+      { id: "c1", name: "Math", credits: 4, assessmentType: "exam", difficulty: 8, priorityWeight: 0.4 },
+    ];
+    const result = await planner.createPlanEnhanced(courses, "2025-02-01", "2025-06-30", mockLLM);
+    expect(result.aiStrategy).toBeTruthy();
+    expect(result.aiTips.length).toBeGreaterThan(0);
+    expect(result.id).toBeTruthy();
+  });
+
+  it("createPlanEnhanced falls back on LLM error", async () => {
+    const planner = new SemesterPlanner();
+    const courses: CourseEntry[] = [
+      { id: "c1", name: "Math", credits: 4, assessmentType: "exam", difficulty: 8, priorityWeight: 0.4 },
+    ];
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await planner.createPlanEnhanced(courses, "2025-02-01", "2025-06-30", badLLM);
+    expect(result.aiStrategy).toBe("");
+    expect(result.aiTips).toEqual([]);
+    expect(result.id).toBeTruthy();
+  });
+});
+
+describe("ClassNotesProcessor LLM enhanced", () => {
+  it("processTranscriptEnhanced returns LLM summary and concepts", async () => {
+    const processor = new ClassNotesProcessor();
+    const result = await processor.processTranscriptEnhanced(
+      "Today we cover recursion. Remember that recursion needs a base case.",
+      { name: "CS101", type: "lecture", topics: ["recursion", "sorting"] },
+      mockLLM,
+    );
+    expect(result.aiSummary).toBeTruthy();
+    expect(result.keyConcepts.length).toBeGreaterThan(0);
+    expect(result.examHints.length).toBeGreaterThan(0);
+  });
+
+  it("processTranscriptEnhanced falls back on LLM error", async () => {
+    const processor = new ClassNotesProcessor();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await processor.processTranscriptEnhanced(
+      "今天我们学习了递归算法的基本概念。重点理解递归的基本原理。作业是完成第三章的练习题。",
+      { name: "CS101", type: "lecture", topics: ["recursion"] },
+      badLLM,
+    );
+    expect(result.aiSummary).toBe("");
+    expect(result.keyConcepts).toEqual([]);
+    expect(result.keyPoints.length).toBeGreaterThan(0);
+  });
+});
+
+describe("SelfChecker LLM enhanced", () => {
+  it("checkArtifactEnhanced returns LLM feedback", async () => {
+    const checker = new SelfChecker();
+    const result = await checker.checkArtifactEnhanced(
+      "This is a test document with enough words to check.",
+      { minWords: 5 },
+      mockLLM,
+    );
+    expect(result.aiFeedback.length).toBeGreaterThan(0);
+    expect(result.overallScore).toBeGreaterThanOrEqual(0);
+  });
+
+  it("checkArtifactEnhanced falls back on LLM error", async () => {
+    const checker = new SelfChecker();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await checker.checkArtifactEnhanced("Test content.", {}, badLLM);
+    expect(result.aiFeedback).toEqual([]);
+    expect(result.overallScore).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("ExamCrashPlanner LLM enhanced", () => {
+  it("extractTopicsEnhanced returns LLM topics", async () => {
+    const planner = new ExamCrashPlanner();
+    const result = await planner.extractTopicsEnhanced(
+      ["Recursion is important. Sorting algorithms are key."],
+      ["Past exam: What is recursion?"],
+      mockLLM,
+    );
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0]!.topic).toBeTruthy();
+  });
+
+  it("extractTopicsEnhanced falls back on LLM error", async () => {
+    const planner = new ExamCrashPlanner();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await planner.extractTopicsEnhanced(
+      ["Recursion is important. Recursion is key."],
+      [],
+      badLLM,
+    );
+    expect(result.length).toBeGreaterThan(0);
   });
 });

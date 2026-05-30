@@ -1,11 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import type { ProjectStore } from "./project-store.js";
 import type { ModelGateway } from "./model-gateway.js";
+import type { SenseNovaImageConfig } from "./sensenova-image.js";
+
+export interface DomainRouteOptions {
+  getImageConfig?: () => SenseNovaImageConfig | undefined;
+}
 
 export async function registerDomainRoutes(
   fastify: FastifyInstance,
   store: ProjectStore,
-  gateway: ModelGateway
+  gateway: ModelGateway,
+  options?: DomainRouteOptions
 ): Promise<void> {
   const { registerCoachingRoutes } = await import("./routes/coaching.js");
   const { registerGradRoutes } = await import("./routes/grad.js");
@@ -19,5 +25,5 @@ export async function registerDomainRoutes(
   await registerResearchRoutes(fastify, store, gateway);
   await registerUndergradRoutes(fastify, store, gateway);
   await registerEfficiencyRoutes(fastify, store, gateway);
-  await registerSenseNovaRoutes(fastify);
+  await registerSenseNovaRoutes(fastify, options?.getImageConfig);
 }

@@ -1376,3 +1376,29 @@ export async function sensenovaImageSizes() {
     "/api/sensenova/image/sizes"
   );
 }
+
+// --- Image Generation Config ---
+
+export interface ImageConfigStatus {
+  configured: boolean;
+  provider: string;
+  model: string;
+  apiKeySet: boolean;
+}
+
+export async function getImageConfig(): Promise<ImageConfigStatus> {
+  const resp = await request<{ data: ImageConfigStatus }>("/api/settings/image");
+  return resp.data;
+}
+
+export async function saveImageConfig(input: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ImageConfigStatus> {
+  const resp = await request<{ data: ImageConfigStatus }>("/api/settings/image", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  return resp.data;
+}
+
+export async function deleteImageConfig(): Promise<void> {
+  await request<{ data: { configured: boolean } }>("/api/settings/image", { method: "DELETE" });
+}

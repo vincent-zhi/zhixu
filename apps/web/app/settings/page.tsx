@@ -8,6 +8,7 @@ import {
   IconDatabase,
   IconBell,
   IconModel,
+  IconImage,
   IconDownload,
   IconTrash,
   IconRefresh,
@@ -22,6 +23,9 @@ import {
   getLLMConfig,
   updateLLMConfig,
   deleteLLMConfig,
+  getImageConfig,
+  saveImageConfig,
+  deleteImageConfig,
   ApiClientError,
 } from "../api-client";
 import type {
@@ -30,6 +34,7 @@ import type {
   SkillManifest,
   LLMConfigStatus,
   UpdateLLMConfigInput,
+  ImageConfigStatus,
 } from "../api-client";
 
 type SettingsSection =
@@ -38,7 +43,8 @@ type SettingsSection =
   | "skill_permissions"
   | "data"
   | "notifications"
-  | "model";
+  | "model"
+  | "image";
 
 interface LocalSettings {
   privacyMode: string;
@@ -50,7 +56,8 @@ interface LocalSettings {
 }
 
 const SETTINGS_NAV: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
-  { key: "model", label: "模型设置", icon: <IconModel size={16} /> },
+  { key: "model", label: "Agent 模型", icon: <IconModel size={16} /> },
+  { key: "image", label: "图像生成", icon: <IconImage size={16} /> },
   { key: "privacy", label: "隐私模式", icon: <IconPrivacy size={16} /> },
   { key: "memory", label: "记忆管理", icon: <IconMemory size={16} /> },
   { key: "skill_permissions", label: "Skill 权限", icon: <IconKey size={16} /> },
@@ -176,13 +183,22 @@ export default function SettingsPage() {
   const [llmSuccess, setLLMSuccess] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // Image generation config
+  const [imageConfig, setImageConfig] = useState<{ configured: boolean; provider: string; model: string; apiKeySet: boolean } | null>(null);
+  const [imageProvider, setImageProvider] = useState<"sensenova" | "dashscope">("sensenova");
+  const [imageForm, setImageForm] = useState({ apiKey: "", baseURL: "https://token.sensenova.cn/v1", model: "sensenova-u1-fast" });
+  const [imageSaving, setImageSaving] = useState(false);
+  const [imageSaveError, setImageSaveError] = useState<string | null>(null);
+  const [imageSaveSuccess, setImageSaveSuccess] = useState<string | null>(null);
+  const [showImageApiKey, setShowImageApiKey] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const projects = await listProjects().catch(() => []);
-      const [capsuleResults, memoryResults, skillData, llmData] = await Promise.all([
+      const [capsuleResults, memoryResults, skillData, llmData, imgData] = await Promise.all([
         Promise.all(projects.map((p) => listCapsules(p.id).catch(() => [] as KnowledgeCapsuleSummary[]))).then(
           (r) => r.flat()
         ),
@@ -191,6 +207,7 @@ export default function SettingsPage() {
         ),
         listSkills().catch(() => [] as SkillManifest[]),
         getLLMConfig().catch(() => null as LLMConfigStatus | null),
+        getImageConfig().catch(() => null as ImageConfigStatus | null),
       ]);
 
       setCapsules(capsuleResults);
@@ -204,6 +221,10 @@ export default function SettingsPage() {
           model: llmData.model || prev.model,
           enableThinking: llmData.enableThinking,
         }));
+      }
+      if (imgData) {
+        setImageConfig(imgData);
+        if (imgData.provider) setImageProvider(imgData.provider as "sensenova" | "dashscope");
       }
     } catch (e) {
       setError(e instanceof ApiClientError ? e.message : "加载设置数据失败");
@@ -644,9 +665,9 @@ export default function SettingsPage() {
 
             {activeSection === "model" && (
               <section className="settings-section">
-                <h2>模型设置</h2>
+                <h2>Agent 模型提供商</h2>
                 <p className="settings-explanation">
-                  配置知序连接的 AI 大语言模型。支持所有 OpenAI 兼容接口，包括阿里云百炼、DeepSeek、OpenAI、商汤 SenseNova 等。
+                  配置知序 AI Agent 使用的大语言模型。支持所有 OpenAI 兼容接口。
                   配置完成后，所有 AI 对话、Agent 调度和 Skill 执行将使用此模型。
                 </p>
 
@@ -909,6 +930,204 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </div>
+              </section>
+            )}
+
+            {activeSection === "image" && (
+              <section className="settings-section">
+                <h2>图像生成提供商</h2>
+                <p className="settings-explanation">
+                  配置知序的图像生成能力。用于报告插图、信息图、学术海报、PPT 配图等场景。
+                  目前支持商汤 SenseNova U1 Fast（免费）和阿里云百炼万相。
+                </p>
+
+                <div className="llm-presets">
+                  <h3>选择提供商</h3>
+                  <div className="llm-preset-list">
+                    <button
+                      className={`llm-preset-card ${imageProvider === "sensenova" ? "llm-preset-card-active" : ""}`}
+                      onClick={() => setImageProvider("sensenova")}
+                    >
+                      <span className="llm-preset-provider">商汤 SenseNova</span>
+                      <span className="llm-preset-model">U1 Fast（免费，2K 分辨率）</span>
+                    </button>
+                    <button
+                      className={`llm-preset-card ${imageProvider === "dashscope" ? "llm-preset-card-active" : ""}`}
+                      onClick={() => setImageProvider("dashscope")}
+                    >
+                      <span className="llm-preset-provider">阿里云百炼</span>
+                      <span className="llm-preset-model">万相（wanx）</span>
+                    </button>
+                  </div>
+                </div>
+
+                {imageProvider === "sensenova" && (
+                  <div className="llm-form" style={{ marginTop: 16 }}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="sn-api-key">SenseNova API Key</label>
+                      <div className="llm-input-with-toggle">
+                        <input
+                          id="sn-api-key"
+                          type={showImageApiKey ? "text" : "password"}
+                          className="form-input"
+                          placeholder="sk-..."
+                          value={imageForm.apiKey}
+                          onChange={(e) => setImageForm((f) => ({ ...f, apiKey: e.target.value }))}
+                        />
+                        <button type="button" className="llm-toggle-visibility" onClick={() => setShowImageApiKey(!showImageApiKey)}>
+                          {showImageApiKey ? "隐藏" : "显示"}
+                        </button>
+                      </div>
+                      <p className="form-hint">
+                        免费申请：<a href="https://platform.sensenova.cn/token-plan" target="_blank" rel="noopener">platform.sensenova.cn/token-plan</a>
+                      </p>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="sn-img-base-url">接口地址</label>
+                      <input
+                        id="sn-img-base-url"
+                        type="text"
+                        className="form-input"
+                        value={imageForm.baseURL}
+                        onChange={(e) => setImageForm((f) => ({ ...f, baseURL: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="sn-img-model">模型</label>
+                      <input
+                        id="sn-img-model"
+                        type="text"
+                        className="form-input"
+                        value={imageForm.model}
+                        onChange={(e) => setImageForm((f) => ({ ...f, model: e.target.value }))}
+                      />
+                      <p className="form-hint">商汤 U1 Fast：sensenova-u1-fast（文生图）</p>
+                    </div>
+                    <div className="llm-form-actions">
+                      <button
+                        className="btn-primary"
+                        disabled={imageSaving || !imageForm.apiKey}
+                        onClick={async () => {
+                          setImageSaving(true);
+                          setImageSaveError(null);
+                          try {
+                            await saveImageConfig({
+                              provider: "sensenova",
+                              apiKey: imageForm.apiKey,
+                              baseURL: imageForm.baseURL,
+                              model: imageForm.model,
+                            });
+                            setImageSaveSuccess("图像生成配置已保存");
+                            setTimeout(() => setImageSaveSuccess(null), 3000);
+                          } catch (e) {
+                            setImageSaveError(e instanceof Error ? e.message : "保存失败");
+                          } finally {
+                            setImageSaving(false);
+                          }
+                        }}
+                      >
+                        {imageSaving ? "保存中..." : "保存配置"}
+                      </button>
+                    </div>
+                    {imageSaveError && <p className="form-error">{imageSaveError}</p>}
+                    {imageSaveSuccess && <p className="form-success">{imageSaveSuccess}</p>}
+
+                    <div style={{ marginTop: 16, padding: "12px 16px", background: "var(--color-gold-light)", borderRadius: 8, fontSize: 13 }}>
+                      <strong>支持的图像尺寸（SenseNova U1 Fast）：</strong>
+                      <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                        {["16:9 (2752×1536)", "9:16 (1536×2752)", "1:1 (2048×2048)", "3:2 (2496×1664)", "4:3 (2368×1760)", "5:4 (2272×1824)", "21:9 (3072×1376)"].map(s => (
+                          <span key={s} style={{ opacity: 0.8 }}>{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {imageProvider === "dashscope" && (
+                  <div className="llm-form" style={{ marginTop: 16 }}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="ds-img-api-key">阿里云百炼 API Key</label>
+                      <div className="llm-input-with-toggle">
+                        <input
+                          id="ds-img-api-key"
+                          type={showImageApiKey ? "text" : "password"}
+                          className="form-input"
+                          placeholder="sk-..."
+                          value={imageForm.apiKey}
+                          onChange={(e) => setImageForm((f) => ({ ...f, apiKey: e.target.value }))}
+                        />
+                        <button type="button" className="llm-toggle-visibility" onClick={() => setShowImageApiKey(!showImageApiKey)}>
+                          {showImageApiKey ? "隐藏" : "显示"}
+                        </button>
+                      </div>
+                      <p className="form-hint">
+                        与 Agent 模型共用同一 API Key（阿里云百炼）
+                      </p>
+                    </div>
+                    <div className="llm-form-actions">
+                      <button
+                        className="btn-primary"
+                        disabled={imageSaving || !imageForm.apiKey}
+                        onClick={async () => {
+                          setImageSaving(true);
+                          setImageSaveError(null);
+                          try {
+                            await saveImageConfig({
+                              provider: "dashscope",
+                              apiKey: imageForm.apiKey,
+                              baseURL: "https://dashscope.aliyuncs.com/api/v1",
+                              model: "wanx-v1",
+                            });
+                            setImageSaveSuccess("图像生成配置已保存");
+                            setTimeout(() => setImageSaveSuccess(null), 3000);
+                          } catch (e) {
+                            setImageSaveError(e instanceof Error ? e.message : "保存失败");
+                          } finally {
+                            setImageSaving(false);
+                          }
+                        }}
+                      >
+                        {imageSaving ? "保存中..." : "保存配置"}
+                      </button>
+                    </div>
+                    {imageSaveError && <p className="form-error">{imageSaveError}</p>}
+                    {imageSaveSuccess && <p className="form-success">{imageSaveSuccess}</p>}
+                  </div>
+                )}
+
+                {imageConfig?.configured && (
+                  <div className="llm-status-card llm-status-connected" style={{ marginTop: 16 }}>
+                    <div className="llm-status-indicator">
+                      <span className="llm-status-dot llm-status-dot-active" />
+                      <strong>图像生成已配置</strong>
+                    </div>
+                    <div className="llm-status-details">
+                      <div className="llm-status-row">
+                        <span className="llm-status-label">提供商</span>
+                        <span className="llm-status-value">{imageConfig.provider === "sensenova" ? "商汤 SenseNova" : "阿里云百炼"}</span>
+                      </div>
+                      <div className="llm-status-row">
+                        <span className="llm-status-label">模型</span>
+                        <span className="llm-status-value">{imageConfig.model}</span>
+                      </div>
+                      <div className="llm-status-row">
+                        <span className="llm-status-label">API Key</span>
+                        <span className="llm-status-value">{imageConfig.apiKeySet ? "已设置" : "未设置"}</span>
+                      </div>
+                    </div>
+                    <button
+                      className="btn-danger"
+                      style={{ marginTop: 8 }}
+                      onClick={async () => {
+                        await deleteImageConfig();
+                        setImageConfig(null);
+                        setImageProvider("sensenova");
+                      }}
+                    >
+                      清除配置
+                    </button>
+                  </div>
+                )}
               </section>
             )}
           </div>

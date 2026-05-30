@@ -2079,6 +2079,82 @@ export async function createServerApp(
     });
   });
 
+  // --- Image Generation Config ---
+  const imageConfigPath = join(process.cwd(), ".zhixu-image-config.json");
+  let imageConfig: { provider: string; apiKey: string; baseURL: string; model: string } | undefined;
+
+  function loadImageConfig(): typeof imageConfig {
+    try {
+      if (existsSync(imageConfigPath)) {
+        const raw = readFileSync(imageConfigPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed.apiKey) { try { parsed.apiKey = decryptText(parsed.apiKey); } catch {} }
+        if (parsed.provider && parsed.apiKey && parsed.baseURL && parsed.model) return parsed;
+      }
+    } catch {}
+    // Fallback to env vars
+    const envKey = process.env.SN_API_KEY ?? process.env.SENSENOVA_API_KEY;
+    if (envKey) {
+      return { provider: "sensenova", apiKey: envKey, baseURL: process.env.SN_BASE_URL ?? "https://token.sensenova.cn/v1", model: process.env.SN_IMAGE_MODEL ?? "sensenova-u1-fast" };
+    }
+    return undefined;
+  }
+  imageConfig = loadImageConfig();
+
+  function persistImageConfig(config: typeof imageConfig): void {
+    try {
+      if (config && config.apiKey) {
+        const copy = { ...config, apiKey: encryptText(config.apiKey) };
+        writeFileSync(imageConfigPath, JSON.stringify(copy, null, 2), "utf-8");
+      } else if (existsSync(imageConfigPath)) {
+        writeFileSync(imageConfigPath, "{}", "utf-8");
+      }
+    } catch {}
+  }
+
+  // Update the sensenova image adapter to use stored config
+  function getSenseNovaImageConfig(): import("./sensenova-image.js").SenseNovaImageConfig | undefined {
+    if (!imageConfig) return undefined;
+    return { apiKey: imageConfig.apiKey, baseURL: imageConfig.baseURL, imageModel: imageConfig.model, chatModel: process.env.SN_CHAT_MODEL ?? "sensenova-6.7-flash-lite" };
+  }
+
+  app.get("/api/settings/image", async (_request, reply) => {
+    return reply.send({
+      data: {
+        configured: imageConfig !== undefined,
+        provider: imageConfig?.provider ?? "",
+        model: imageConfig?.model ?? "",
+        apiKeySet: imageConfig?.apiKey ? true : false,
+      }
+    });
+  });
+
+  app.put("/api/settings/image", async (request, reply) => {
+    const body = request.body as { provider?: string; apiKey?: string; baseURL?: string; model?: string };
+
+    if (!body.apiKey) {
+      return reply.status(422).send({ error: { code: "VALIDATION_ERROR", message: "apiKey is required", requestId: request.id } });
+    }
+
+    imageConfig = {
+      provider: body.provider ?? "sensenova",
+      apiKey: body.apiKey,
+      baseURL: body.baseURL ?? (body.provider === "dashscope" ? "https://dashscope.aliyuncs.com/api/v1" : "https://token.sensenova.cn/v1"),
+      model: body.model ?? (body.provider === "dashscope" ? "wanx-v1" : "sensenova-u1-fast"),
+    };
+    persistImageConfig(imageConfig);
+
+    return reply.send({
+      data: { configured: true, provider: imageConfig.provider, model: imageConfig.model, apiKeySet: true }
+    });
+  });
+
+  app.delete("/api/settings/image", async (_request, reply) => {
+    imageConfig = undefined;
+    persistImageConfig(undefined);
+    return reply.send({ data: { configured: false } });
+  });
+
   const ZHIXU_STREAM_SYSTEM_PROMPT = `你是"知序"，一个专业的AI学习科研助手。你可以帮助用户：
 1. 创建和管理研究项目
 2. 制作PPT演示文稿
@@ -2899,8 +2975,8 @@ export async function createServerApp(
     return { files };
   });
 
-  // Register domain package routes (coaching, grad, research, undergrad, efficiency)
-  await registerDomainRoutes(app, projectStore, modelGateway);
+  // Register domain package routes (coaching, grad, research, undergrad, efficiency, sensenova)
+  await registerDomainRoutes(app, projectStore, modelGateway, { getImageConfig: getSenseNovaImageConfig });
 
   return app;
 }

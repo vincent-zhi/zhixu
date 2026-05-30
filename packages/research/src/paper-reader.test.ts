@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PaperReader } from "./paper-reader.js";
-import type { PaperEntry, PaperMatrix } from "./types.js";
+import type { PaperEntry, PaperMatrix, LLMCallable } from "./types.js";
 
 describe("PaperReader", () => {
   const reader = new PaperReader();
@@ -205,6 +205,116 @@ Extending to mixture-of-experts models and exploring dynamic batching strategies
       expect(outline.length).toBeGreaterThan(0);
       expect(outline).toContain("Introduction and Background");
       expect(outline).toContain("Conclusion");
+    });
+  });
+});
+
+const mockLLM: LLMCallable = {
+  async chat() {
+    return {
+      content: JSON.stringify({
+        title: "Enhanced Paper Title",
+        authors: ["Alice", "Bob"],
+        year: 2024,
+        venue: "ICML",
+        problem: "LLM extracted problem",
+        method: "LLM extracted method",
+        dataset: "Custom dataset",
+        metrics: ["accuracy", "F1"],
+        mainResults: "LLM extracted results",
+        limitations: ["Limitation 1", "Limitation 2"],
+        futureWork: ["Future 1"],
+        contributions: ["Contribution 1", "Contribution 2"],
+        reproducibility: "Code available on GitHub",
+      }),
+    };
+  },
+};
+
+describe("PaperReader LLM enhanced", () => {
+  const reader = new PaperReader();
+
+  const samplePaper = `# Introduction
+This paper addresses efficient text classification.
+
+# Method
+We use transformers with LoRA.
+
+# Results
+Achieved 92% accuracy.`;
+
+  describe("readPaperEnhanced", () => {
+    it("returns LLM-enriched paper entry", async () => {
+      const result = await reader.readPaperEnhanced(samplePaper, mockLLM);
+      expect(result.title).toBe("Enhanced Paper Title");
+      expect(result.authors).toEqual(["Alice", "Bob"]);
+      expect(result.year).toBe(2024);
+      expect(result.venue).toBe("ICML");
+      expect(result.problem).toBe("LLM extracted problem");
+      expect(result.method).toBe("LLM extracted method");
+      expect((result as any).contributions).toEqual(["Contribution 1", "Contribution 2"]);
+      expect((result as any).reproducibility).toBe("Code available on GitHub");
+    });
+
+    it("falls back to heuristic on LLM error", async () => {
+      const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+      const result = await reader.readPaperEnhanced(samplePaper, badLLM);
+      expect(result.title).toBeTruthy();
+      expect(result.method).toBeTruthy();
+      // Should have heuristic values from readPaper
+      expect(result.method).toContain("transformers");
+    });
+
+    it("preserves heuristic values when LLM returns partial data", async () => {
+      const partialLLM: LLMCallable = {
+        async chat() {
+          return { content: JSON.stringify({ title: "Partial Title" }) };
+        },
+      };
+      const result = await reader.readPaperEnhanced(samplePaper, partialLLM);
+      expect(result.title).toBe("Partial Title");
+      // year should still come from heuristic since LLM didn't provide it
+      expect(result.year).toBeGreaterThan(2000);
+    });
+  });
+
+  describe("comparePapersEnhanced", () => {
+    it("returns LLM-enriched comparison with method classification", async () => {
+      const paper1 = reader.readPaper({ id: "src-1", fileName: "paper1.pdf", content: samplePaper });
+      const paper2: PaperEntry = { ...paper1, id: "p2", sourceId: "s2", title: "Paper 2", method: "CNN approach" };
+
+      const compareLLM: LLMCallable = {
+        async chat() {
+          return {
+            content: JSON.stringify({
+              methodClassification: [{ category: "Transformer", papers: ["Paper 1"] }, { category: "CNN", papers: ["Paper 2"] }],
+              controversies: [{ topic: "Architecture choice", positions: ["Transformer better", "CNN sufficient"] }],
+              researchGaps: ["Gap 1", "Gap 2"],
+              suggestedOutline: ["Section 1", "Section 2"],
+            }),
+          };
+        },
+      };
+
+      const result = await reader.comparePapersEnhanced([paper1, paper2], compareLLM);
+      expect(result.methodClassification).toHaveLength(2);
+      expect(result.controversies).toHaveLength(1);
+      expect(result.controversies[0]!.topic).toBe("Architecture choice");
+      expect(result.researchGaps).toContain("Gap 1");
+      expect(result.suggestedOutline).toContain("Section 1");
+      // Base PaperMatrix fields should still be present
+      expect(result.papers).toHaveLength(2);
+      expect(result.comparisonMatrix.length).toBeGreaterThan(0);
+    });
+
+    it("falls back to heuristic comparison on LLM error", async () => {
+      const paper1 = reader.readPaper({ id: "src-1", fileName: "paper1.pdf", content: samplePaper });
+      const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+      const result = await reader.comparePapersEnhanced([paper1], badLLM);
+      expect(result.methodClassification).toEqual([]);
+      expect(result.controversies).toEqual([]);
+      expect(result.papers).toHaveLength(1);
+      expect(result.researchGaps).toBeDefined();
     });
   });
 });

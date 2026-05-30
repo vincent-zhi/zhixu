@@ -1,4 +1,4 @@
-import type { PaperEntry, PaperMatrix, ComparisonField, TimelineEntry } from "./types.js";
+import type { PaperEntry, PaperMatrix, ComparisonField, TimelineEntry, LLMCallable } from "./types.js";
 
 interface SectionMap {
   [key: string]: string;
@@ -223,5 +223,67 @@ export class PaperReader {
     ];
 
     return outline;
+  }
+
+  async readPaperEnhanced(content: string, llm: LLMCallable): Promise<PaperEntry> {
+    const basic = this.readPaper({ id: crypto.randomUUID(), fileName: "", content });
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术论文精读助手。从论文内容中提取结构化信息。
+返回 JSON：{"title": "...", "authors": ["..."], "year": 2024, "venue": "...", "problem": "...", "method": "...", "dataset": "...", "metrics": ["..."], "mainResults": "...", "limitations": ["..."], "futureWork": ["..."], "contributions": ["..."], "reproducibility": "..."}`,
+        messages: [{ role: "user", content: content.slice(0, 6000) }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return { ...basic, ...parsed, authors: parsed.authors ?? basic.authors, year: parsed.year ?? basic.year };
+    } catch {
+      return basic;
+    }
+  }
+
+  async comparePapersEnhanced(
+    entries: PaperEntry[],
+    llm: LLMCallable,
+  ): Promise<
+    Omit<PaperMatrix, "controversies"> & {
+      methodClassification: Array<{ category: string; papers: string[] }>;
+      controversies: Array<{ topic: string; positions: string[] }>;
+    }
+  > {
+    const basic = this.comparePapers(entries);
+    try {
+      const result = await llm.chat({
+        system: `你是一位文献综述助手。对比分析多篇论文，识别方法分类、争议点和研究空白。
+返回 JSON：{"methodClassification": [{"category": "...", "papers": ["..."]}], "controversies": [{"topic": "...", "positions": ["..."]}], "researchGaps": ["..."], "suggestedOutline": ["..."]}`,
+        messages: [
+          {
+            role: "user",
+            content: entries
+              .map(
+                (e, i) =>
+                  `论文${i + 1}: ${e.title}\n方法: ${e.method}\n结果: ${e.mainResults}\n局限: ${Array.isArray(e.limitations) ? e.limitations.join("、") : e.limitations}`,
+              )
+              .join("\n\n"),
+          },
+        ],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return {
+        ...basic,
+        methodClassification: parsed.methodClassification ?? [],
+        controversies: parsed.controversies ?? [],
+        researchGaps: parsed.researchGaps ?? basic.researchGaps,
+        suggestedOutline: parsed.suggestedOutline ?? basic.suggestedOutline,
+      };
+    } catch {
+      return {
+        ...basic,
+        methodClassification: [],
+        controversies: [],
+        researchGaps: basic.researchGaps,
+        suggestedOutline: basic.suggestedOutline,
+      };
+    }
   }
 }

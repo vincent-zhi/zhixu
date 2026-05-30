@@ -44,3 +44,12 @@ export interface LiteratureSearchResult {
   totalFound: number;
   hasMore: boolean;
 }
+
+/** Minimal LLM interface for domain enhancement — avoids hard dependency on @zhixu/model-gateway */
+export interface LLMCallable {
+  chat(params: {
+    system: string;
+    messages: Array<{ role: "user" | "assistant"; content: string }>;
+    responseFormat?: { type: "json_object" };
+  }): Promise<{ content: string }>;
+}

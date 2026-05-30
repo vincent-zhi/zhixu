@@ -22,8 +22,6 @@ function asLLMCallable(gateway: ModelGateway): LLMCallable | null {
           ...params.messages.map(m => ({
             role: m.role as "user" | "assistant",
             content: m.content,
-            toolCalls: undefined,
-            toolCallId: undefined,
           })),
         ],
         systemPrompt: params.system,

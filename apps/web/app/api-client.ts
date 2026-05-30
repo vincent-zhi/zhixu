@@ -18,6 +18,8 @@ import type {
   VerifyOutputInput,
 } from "@zhixu/core";
 
+export type { ArtifactBlockSummary };
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export interface ApiError {
@@ -146,6 +148,8 @@ export interface CreateEvidenceInput {
   evidenceType: string;
   quoteText?: string;
   pageNumber?: number;
+  textSpan?: string;
+  url?: string;
   confidence?: number;
 }
 
@@ -427,6 +431,50 @@ export function addSource(projectId: string, input: CreateSourceInput): Promise<
   });
 }
 
+export interface UploadResult {
+  id: string;
+  projectId: string;
+  uploadedBy: string;
+  fileName: string;
+  fileType: string;
+  storageUri: string;
+  parseStatus: string;
+  ocrStatus: string;
+  indexStatus: string;
+  sensitivityLevel: string;
+  createdAt: string;
+}
+
+export function getFileUrl(projectId: string, filename: string): string {
+  return `${BASE_URL}/api/files/${projectId}/${encodeURIComponent(filename)}`;
+}
+
+export async function uploadFile(projectId: string, file: File): Promise<UploadResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const url = `${BASE_URL}/api/projects/${projectId}/sources/upload`;
+  const response = await fetch(url, {
+    method: "POST",
+    body: formData,
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    let errorBody: ApiError = {
+      code: "UNKNOWN_ERROR",
+      message: `Upload failed with status ${response.status}`,
+    };
+    try {
+      const parsed = (await response.json()) as ApiErrorResponse;
+      if (parsed.error) {
+        errorBody = parsed.error;
+      }
+    } catch {}
+    throw new ApiClientError(errorBody);
+  }
+  const body = (await response.json()) as ApiResponse<UploadResult>;
+  return body.data;
+}
+
 export function listSources(projectId: string): Promise<SourceSummary[]> {
   return request<SourceSummary[]>(`/api/projects/${projectId}/sources`);
 }
@@ -699,6 +747,80 @@ export function chat(input: ChatInput): Promise<ChatResult> {
   });
 }
 
+export interface StreamCallbacks {
+  onLifecycle?: (data: { phase: string; runId?: string; round?: number; error?: string; durationMs?: number }) => void;
+  onToolStart?: (data: { toolCallId: string; functionName: string }) => void;
+  onToolProgress?: (data: { toolCallId: string; functionName: string; status: string }) => void;
+  onToolEnd?: (data: { toolCallId: string; functionName: string; result: string; durationMs?: number }) => void;
+  onToolResult?: (data: { toolCallId: string; functionName: string; result: string }) => void;
+  onThinkingStart?: () => void;
+  onThinkingDelta?: (content: string) => void;
+  onThinkingEnd?: (content: string) => void;
+  onContentDelta?: (content: string) => void;
+  onDone?: (data: { finishReason: string; thinking?: string; content?: string; rounds?: number }) => void;
+  onError?: (message: string) => void;
+}
+
+export async function chatStream(input: ChatInput, callbacks: StreamCallbacks): Promise<void> {
+  const url = `${BASE_URL}/api/chat/stream`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    let message = `Stream failed with status ${response.status}`;
+    try {
+      const parsed = (await response.json()) as ApiErrorResponse;
+      if (parsed.error) message = parsed.error.message ?? message;
+    } catch {}
+    callbacks.onError?.(message);
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) { callbacks.onError?.("No response body"); return; }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    let currentEvent = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ")) {
+        const dataStr = line.slice(6);
+        try {
+          const data = JSON.parse(dataStr);
+          switch (currentEvent) {
+            case "lifecycle": callbacks.onLifecycle?.(data); break;
+            case "tool_start": callbacks.onToolStart?.(data); break;
+            case "tool_progress": callbacks.onToolProgress?.(data); break;
+            case "tool_end": callbacks.onToolEnd?.(data); break;
+            case "tool_result": callbacks.onToolResult?.(data); break;
+            case "thinking_start": callbacks.onThinkingStart?.(); break;
+            case "thinking_delta": callbacks.onThinkingDelta?.(data.content); break;
+            case "thinking_end": callbacks.onThinkingEnd?.(data.content); break;
+            case "content_delta": callbacks.onContentDelta?.(data.content); break;
+            case "done": callbacks.onDone?.(data); break;
+            case "error": callbacks.onError?.(data.message); break;
+          }
+        } catch {}
+      }
+    }
+  }
+}
+
 export function getTrace(traceId: string): Promise<AgentJobSummary> {
   return request<AgentJobSummary>(`/api/traces/${traceId}`);
 }
@@ -776,4 +898,447 @@ async function requestRaw(
   return response.blob();
 }
 
+export interface PaperMatrix {
+  sourceId: string;
+  fileName: string;
+  researchQuestion: string;
+  backgroundMotivation: string;
+  methodFramework: string;
+  dataset: string;
+  experimentSetup: string;
+  results: string;
+  contributions: string;
+  limitations: string;
+  reproducibility: string;
+  responsibilityColor: string;
+}
+
+export interface PaperComparison {
+  sourceIds: string[];
+  methodCategories: string[];
+  timeline: string[];
+  disputes: string[];
+  researchGaps: string[];
+  matrix: Record<string, Record<string, string>>;
+  responsibilityColor: string;
+}
+
+export interface PaperMatrixResult {
+  sourceIds: string[];
+  dimensions: string[];
+  rows: Array<{ dimension: string; values: Record<string, string> }>;
+  responsibilityColor: string;
+}
+
+export interface ExamPlan {
+  examDate: string;
+  daysUntil: number;
+  dailyHours: number;
+  knowledgeMap: { summary: string; topics: string[] };
+  plan: Array<{ day: number; tasks: string[]; duration: number }>;
+  responsibilityColor: string;
+}
+
+export interface ExamQuestion {
+  id: string;
+  projectId: string;
+  topic: string;
+  questionType: string;
+  questionText: string;
+  options: string[] | null;
+  correctAnswer: string;
+  explanation: string;
+  createdAt: string;
+}
+
+export interface ExamSubmission {
+  id: string;
+  questionId: string;
+  projectId: string;
+  answer: string;
+  correct: boolean;
+  explanation: string;
+  mistakeType: string | null;
+  createdAt: string;
+}
+
+export interface ExamMistake extends ExamSubmission {
+  questionText: string;
+  correctAnswer: string;
+  topic: string;
+}
+
+export interface ThreePlanOption {
+  label: string;
+  completionProbability: number;
+  overtimeRisk: number;
+  contentErrorRisk: number;
+  sourceGapRisk: number;
+  aiInvolvementRatio: number;
+  userEffortHours: number;
+  qualityCeiling: number;
+  applicableScenario: string;
+  tasks: string[];
+}
+
+export interface ThreePlanResult {
+  balanced: ThreePlanOption;
+  rush: ThreePlanOption;
+  safe: ThreePlanOption;
+  comparisonSummary: string;
+}
+
+export function paperRead(projectId: string, input: { sourceId: string }): Promise<PaperMatrix> {
+  return request<PaperMatrix>(`/api/projects/${projectId}/paper/read`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function paperCompare(projectId: string, input: { sourceIds: string[] }): Promise<PaperComparison> {
+  return request<PaperComparison>(`/api/projects/${projectId}/paper/compare`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function paperMatrix(projectId: string, input: { sourceIds: string[]; dimensions?: string[] }): Promise<PaperMatrixResult> {
+  return request<PaperMatrixResult>(`/api/projects/${projectId}/paper/matrix`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function examPlan(projectId: string, input: { examDate: string; dailyHours?: number }): Promise<ExamPlan> {
+  return request<ExamPlan>(`/api/projects/${projectId}/exam/plan`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function examQuestions(projectId: string, input: { topic: string; questionTypes?: string[]; count?: number }): Promise<ExamQuestion[]> {
+  return request<ExamQuestion[]>(`/api/projects/${projectId}/exam/questions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function examSubmit(projectId: string, input: { questionId: string; answer: string }): Promise<ExamSubmission> {
+  return request<ExamSubmission>(`/api/projects/${projectId}/exam/submit`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function examMistakes(projectId: string): Promise<ExamMistake[]> {
+  return request<ExamMistake[]>(`/api/projects/${projectId}/exam/mistakes`);
+}
+
 export { listProjects as getProjects, checkWatcher as getWatcherChecks };
+
+export async function listArtifactBlocks(artifactId: string): Promise<ArtifactBlockSummary[]> {
+  return request<ArtifactBlockSummary[]>(`/api/artifacts/${artifactId}/blocks`);
+}
+
+export async function createArtifactBlock(artifactId: string, data: { blockType: string; contentJson: Record<string, unknown>; orderIndex: number; responsibilityColor?: string }): Promise<ArtifactBlockSummary> {
+  return request<ArtifactBlockSummary>(`/api/artifacts/${artifactId}/blocks`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteArtifactBlock(artifactId: string, blockId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/api/artifacts/${artifactId}/blocks/${blockId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function reorderArtifactBlocks(artifactId: string, blockIds: string[]): Promise<ArtifactBlockSummary[]> {
+  return request<ArtifactBlockSummary[]>(`/api/artifacts/${artifactId}/blocks/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ blockIds }),
+  });
+}
+
+export async function executeAICommand(projectId: string, artifactId: string, blockId: string, command: string): Promise<ArtifactBlockSummary> {
+  return request<ArtifactBlockSummary>(`/api/projects/${projectId}/artifacts/doc/ai-command`, {
+    method: "POST",
+    body: JSON.stringify({ artifactId, blockId, command }),
+  });
+}
+
+export async function generatePPTOutline(projectId: string, data: { artifactId: string; selectedTopic: string; slideCount?: number }): Promise<ArtifactBlockSummary[]> {
+  return request<ArtifactBlockSummary[]>(`/api/projects/${projectId}/artifacts/ppt/outline`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function generatePPTSlide(projectId: string, data: { artifactId: string; blockId: string }): Promise<ArtifactBlockSummary> {
+  return request<ArtifactBlockSummary>(`/api/projects/${projectId}/artifacts/ppt/generate-slide`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function generateAllSlides(projectId: string, data: { artifactId: string }): Promise<ArtifactBlockSummary[]> {
+  return request<ArtifactBlockSummary[]>(`/api/projects/${projectId}/artifacts/ppt/generate-all`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function generateDocSection(projectId: string, data: { artifactId: string; blockId: string }): Promise<ArtifactBlockSummary> {
+  return request<ArtifactBlockSummary>(`/api/projects/${projectId}/artifacts/doc/generate-section`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function createPPTArtifact(projectId: string, data: { title: string; topicSuggestions?: string[] }): Promise<{ artifact: ArtifactSummary; suggestions: string[] }> {
+  return request<{ artifact: ArtifactSummary; suggestions: string[] }>(`/api/projects/${projectId}/artifacts/ppt/create`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function createDocArtifact(projectId: string, data: { title: string; type: "docx" | "report" | "review"; outlineSections?: string[] }): Promise<ArtifactSummary> {
+  return request<ArtifactSummary>(`/api/projects/${projectId}/artifacts/doc/create`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export interface VersionDiffResult {
+  additions: Array<{ field: string; value: unknown }>;
+  modifications: Array<{ field: string; oldValue: unknown; newValue: unknown }>;
+  deletions: Array<{ field: string; value: unknown }>;
+  summary: { added: number; modified: number; deleted: number };
+}
+
+export interface BlockDiffItem {
+  index: number;
+  changeType: "added" | "modified" | "removed" | "unchanged";
+  oldBlock?: Record<string, unknown>;
+  newBlock?: Record<string, unknown>;
+}
+
+export async function getVersionDiff(entityType: string, entityId: string, v1: string, v2: string): Promise<VersionDiffResult> {
+  return request<VersionDiffResult>(`/api/versions/${entityType}/${entityId}/diff?v1=${v1}&v2=${v2}`);
+}
+
+export async function getArtifactBlockDiff(artifactId: string, fromVersionId: string, toVersionId: string): Promise<BlockDiffItem[]> {
+  return request<BlockDiffItem[]>(`/api/artifacts/${artifactId}/blocks/diff?from=${fromVersionId}&to=${toVersionId}`);
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  educationStage?: string;
+  discipline?: string;
+  createdAt: string;
+}
+
+export interface AuthResult {
+  user: AuthUser;
+  token: string;
+}
+
+export async function register(data: { email: string; password: string; name: string; educationStage?: string | undefined; discipline?: string | undefined }): Promise<AuthResult> {
+  return request<AuthResult>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function login(data: { email: string; password: string }): Promise<AuthResult> {
+  return request<AuthResult>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getMe(token: string): Promise<AuthUser> {
+  return request<AuthUser>("/api/auth/me", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function logout(token: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>("/api/auth/logout", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Domain Package API Functions (coaching, grad, research, undergrad, efficiency)
+// ─────────────────────────────────────────────────────────────
+
+// --- Coaching ---
+export async function startDefenseSimulation(projectId: string, input: { paperContent?: string }) {
+  return request<{ questions: Array<{ id: string; category: string; question: string; expectedPoints: string[]; difficulty: number }>; gateId: string; source: string }>(
+    `/api/projects/${projectId}/coaching/defense/start`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function submitDefenseAnswer(projectId: string, input: { questionId: string; question: string; expectedPoints: string[]; answer: string }) {
+  return request<{ score: number; strengths: string[]; weaknesses: string[]; suggestions: string[]; coveredPoints?: string[]; missedPoints?: string[] }>(
+    `/api/projects/${projectId}/coaching/defense/answer`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function getSocraticQuestions(projectId: string, input: { topic: string; depth?: number; conversationHistory?: string[] }) {
+  return request<Array<{ category: string; question: string; followUp: string }>>(
+    `/api/projects/${projectId}/coaching/socratic`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function getMeetingBrief(projectId: string) {
+  return request<{ meetingType: string; keyPoints: string[]; suggestedSlides: string[]; anticipatedQuestions: string[]; preparationChecklist: string[] }>(
+    `/api/projects/${projectId}/coaching/meeting-brief`, { method: "POST", body: JSON.stringify({}) }
+  );
+}
+
+export async function getDiagnosticReport(projectId: string) {
+  return request<{ completionRate: number; averageDelayDays: number; riskAreas: string[]; strengths: string[]; aiInsights: string[]; retentionScore: number }>(
+    `/api/projects/${projectId}/coaching/diagnostic`, { method: "POST", body: JSON.stringify({}) }
+  );
+}
+
+export async function getProcrastinationHelp(projectId: string, input: { delayDays: number; taskTitle?: string }) {
+  return request<{ tier: string; message: string; microTasks: Array<{ step: string; estimatedMinutes: number }> }>(
+    `/api/projects/${projectId}/coaching/procrastination`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+// --- Grad ---
+export async function gradSubmissionCheck(projectId: string, input: { venue: string; content?: string; customRequirements?: string[] }) {
+  return request<{ items: Array<{ name: string; met: boolean; detail: string }>; readiness: number; aiAnalysis: string[] }>(
+    `/api/projects/${projectId}/grad/submission-check`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function gradReviewResponse(projectId: string, input: { rawReview: string; paperContent?: string }) {
+  return request<{ comments: any[]; actionItems: any[]; responseLetter: any[]; overallStrategy: string; aiDraftSections: any[]; gateId?: string }>(
+    `/api/projects/${projectId}/grad/review-response`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function gradExperimentLog(projectId: string, input: { log: any }) {
+  return request<{ hasAnomaly: boolean; priority: number; issues: string[]; hypotheses: string[]; nextSteps: string[]; gateId?: string }>(
+    `/api/projects/${projectId}/grad/experiment-log`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function gradGrantAnalysis(projectId: string, input: { application: any }) {
+  return request<{ logicGaps: string[]; evidenceGaps: string[]; completeness: number; aiReview: string[]; gateId?: string }>(
+    `/api/projects/${projectId}/grad/grant-analysis`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function gradResearchGaps(projectId: string, input?: { papers?: Array<{ title: string; limitations: string; futureWork: string }> }) {
+  return request<{ gaps: Array<{ description: string; score: number }>; aiDirections: Array<{ direction: string; rationale: string; feasibility: number }>; gateId?: string }>(
+    `/api/projects/${projectId}/grad/research-gaps`, { method: "POST", body: JSON.stringify(input ?? {}) }
+  );
+}
+
+export async function gradCitationFix(projectId: string, input: { citations: string[] }) {
+  return request<{ results: Array<{ original: string; fixed: string; style: string; confidence: number }> }>(
+    `/api/projects/${projectId}/grad/citation-fix`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function gradAcademicTracker(projectId: string, input: { keywords: string[]; authors: string[]; venues: string[]; papers: Array<{ title: string; abstract: string; year: number }> }) {
+  return request<{ digest: Array<{ title: string; relevance: number; summary: string; trends: string[] }> }>(
+    `/api/projects/${projectId}/grad/academic-tracker`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+// --- Research ---
+export async function paperReadEnhanced(projectId: string, input: { sourceId: string; content: string }) {
+  return request<any>(
+    `/api/projects/${projectId}/research/paper-read-enhanced`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function paperCompareEnhanced(projectId: string, input: { papers: Array<{ title: string; content: string }> }) {
+  return request<any>(
+    `/api/projects/${projectId}/research/paper-compare-enhanced`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+// --- Undergrad ---
+export async function undergradSemesterPlan(projectId: string, input: { courses: any[]; semesterStart: string; semesterEnd: string }) {
+  return request<any>(
+    `/api/projects/${projectId}/undergrad/semester-plan`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function undergradClassNotes(projectId: string, input: { rawTranscript: string; courseInfo?: { name: string; type: string; topics: string[] } }) {
+  return request<any>(
+    `/api/projects/${projectId}/undergrad/class-notes`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function undergradSelfCheck(projectId: string, input: { content: string; options?: { minWords?: number; maxWords?: number; requiredSections?: string[] } }) {
+  return request<any>(
+    `/api/projects/${projectId}/undergrad/self-check`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function undergradExamCrash(projectId: string, input: { sources: string[]; pastExams?: string[]; examDate: string; dailyHours: number }) {
+  return request<any>(
+    `/api/projects/${projectId}/undergrad/exam-crash`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function undergradPPTBeautify(projectId: string, input: { slides: string[] }) {
+  return request<any>(
+    `/api/projects/${projectId}/undergrad/ppt-beautify`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function undergradGroupDivide(projectId: string, input: { members: any[]; taskDescriptions: string[]; totalHours: number }) {
+  return request<any>(
+    `/api/projects/${projectId}/undergrad/group-divide`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+// --- Efficiency ---
+export async function efficiencyTermbase(projectId: string, input: { action: string; [key: string]: any }) {
+  return request<any>(
+    `/api/projects/${projectId}/efficiency/termbase`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function efficiencyFragments(projectId: string, input: { action: string; [key: string]: any }) {
+  return request<any>(
+    `/api/projects/${projectId}/efficiency/fragments`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function efficiencyCrossProject(projectId: string, input: { action: string; [key: string]: any }) {
+  return request<any>(
+    `/api/projects/${projectId}/efficiency/cross-project`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function efficiencyStyleUnify(projectId: string, input: { text: string; profile?: any }) {
+  return request<any>(
+    `/api/projects/${projectId}/efficiency/style-unify`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function efficiencyDeduplicate(projectId: string, input: { items: string[]; threshold?: number }) {
+  return request<any>(
+    `/api/projects/${projectId}/efficiency/deduplicate`, { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export async function efficiencyFormatConvert(projectId: string, input: { content: string; from: string; to: string }) {
+  return request<any>(
+    `/api/projects/${projectId}/efficiency/format-convert`, { method: "POST", body: JSON.stringify(input) }
+  );
+}

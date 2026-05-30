@@ -9,7 +9,7 @@ function asLLMCallable(gateway: ModelGateway): LLMCallable | null {
   return {
     async chat(params) {
       const result = await gateway.chatWithTools!({
-        messages: [{ role: "system", content: params.system }, ...params.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content, toolCalls: undefined, toolCallId: undefined }))],
+        messages: [{ role: "system", content: params.system }, ...params.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content }))],
         systemPrompt: params.system,
       });
       const response = result.response as any;

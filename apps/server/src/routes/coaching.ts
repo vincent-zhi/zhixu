@@ -11,7 +11,7 @@ function asLLMCallable(gateway: ModelGateway): LLMCallable | null {
       const result = await gateway.chatWithTools!({
         messages: [
           { role: "system", content: params.system },
-          ...params.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content, toolCalls: undefined, toolCallId: undefined })),
+          ...params.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
         ],
         systemPrompt: params.system,
       });
@@ -119,7 +119,12 @@ export async function registerCoachingRoutes(fastify: FastifyInstance, store: Pr
 
     if (llm) {
       return diagnosticEngine.generateInsightReport({
-        tasks: project.tasks, sourceCount: project.sources.length, evidenceCoverage: 0.5, llm,
+        tasks: project.tasks.map((t: any) => ({
+          title: t.title, status: t.status,
+          ...(t.dueAt ? { dueAt: String(t.dueAt) } : {}),
+          ...(t.completedAt ? { completedAt: String(t.completedAt) } : {}),
+        })),
+        sourceCount: project.sources.length, evidenceCoverage: 0.5, llm,
       });
     }
     return diagnosticEngine.generateReport({

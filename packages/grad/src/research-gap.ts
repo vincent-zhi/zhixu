@@ -1,4 +1,4 @@
-import type { ResearchGap } from "./types.js";
+import type { ResearchGap, LLMCallable } from "./types.js";
 
 export class ResearchGapAnalyzer {
   analyzeGaps(
@@ -109,5 +109,24 @@ export class ResearchGapAnalyzer {
     if (gap.evidence.length <= 1) score += 2;
     if (gap.requiredExperiments.length > 3) score += 1;
     return Math.min(10, score);
+  }
+
+  async analyzeGapsEnhanced(
+    papers: Array<{ title: string; limitations: string; futureWork: string }>,
+    llm: LLMCallable
+  ): Promise<{ gaps: ResearchGap[]; aiDirections: Array<{ direction: string; rationale: string; feasibility: number }> }> {
+    const gaps = this.analyzeGaps(papers);
+    try {
+      const result = await llm.chat({
+        system: `你是一位科研方向规划助手。综合多篇论文的局限性和未来工作，推荐 3-5 个可行的研究方向。
+返回 JSON：{"directions": [{"direction": "研究方向描述", "rationale": "基于哪些论文的什么空白", "feasibility": 0.0-1.0}]}`,
+        messages: [{ role: "user", content: `论文摘要和局限性：\n${papers.slice(0, 5).map((p, i) => `论文${i + 1}：${p.title}\n局限性：${p.limitations}\n未来工作：${p.futureWork}`).join("\n\n")}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return { gaps, aiDirections: parsed.directions ?? [] };
+    } catch {
+      return { gaps, aiDirections: [] };
+    }
   }
 }

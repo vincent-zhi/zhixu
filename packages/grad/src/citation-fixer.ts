@@ -1,3 +1,5 @@
+import type { LLMCallable } from "./types.js";
+
 interface CitationInput {
   raw: string;
   doi?: string;
@@ -112,5 +114,35 @@ export class CitationFixer {
     }
 
     return result;
+  }
+
+  async fixCitationsEnhanced(
+    citations: string[],
+    llm: LLMCallable
+  ): Promise<Array<{ original: string; fixed: string; style: string; confidence: number }>> {
+    const citationObjects = citations.map(raw => ({ raw, style: "APA" as const }));
+    const fixed = this.formatCitations(citationObjects);
+    const anomalyObjects = citations.map(raw => ({ raw }));
+    const anomalies = this.detectAnomalies(anomalyObjects);
+
+    if (anomalies.length === 0) return fixed.map((f, i) => ({ original: citations[i] ?? "", fixed: f.formatted, style: "APA", confidence: 0.95 }));
+
+    try {
+      const result = await llm.chat({
+        system: `你是一位参考文献修复助手。根据不完整的引用信息，补全缺失的元数据（title, authors, year, venue, DOI）。
+返回 JSON 数组：[{"original": "原始文本", "fixed": "修复后的完整引用", "missing": ["缺失字段"]}]`,
+        messages: [{ role: "user", content: anomalies.join("\n---\n") }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return (Array.isArray(parsed) ? parsed : parsed.citations ?? []).map((c: any) => ({
+        original: c.original ?? "",
+        fixed: c.fixed ?? c.original ?? "",
+        style: "AI补全",
+        confidence: 0.7,
+      }));
+    } catch {
+      return fixed.map((f, i) => ({ original: citations[i] ?? "", fixed: f.formatted, style: "APA", confidence: 0.8 }));
+    }
   }
 }

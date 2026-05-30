@@ -7,7 +7,34 @@ import { ResearchGapAnalyzer } from "./research-gap.js";
 import { AcademicTrackerManager } from "./academic-tracker.js";
 import { AcademicResumeBuilder } from "./academic-resume.js";
 import { CitationFixer } from "./citation-fixer.js";
-import type { GrantSection, ResumeSection } from "./types.js";
+import type { GrantSection, ResumeSection, LLMCallable } from "./types.js";
+
+const mockLLM: LLMCallable = {
+  async chat() {
+    return {
+      content: JSON.stringify({
+        readiness: 0.85,
+        analysis: ["建议补充实验对比数据", "摘要需要更精简"],
+        missing: ["缺少代码可用性声明"],
+        sections: [
+          { reviewerComment: "Methodology unclear", response: "We have revised Section 3.", changes: "Rewrote methodology section" },
+        ],
+        overallStrategy: "Focus on major concerns",
+        hypotheses: ["温度波动导致测量偏差", "试剂批次差异"],
+        nextSteps: ["重新校准仪器", "使用新批次试剂重复实验"],
+        completeness: 0.75,
+        review: ["创新点描述不够清晰", "技术路线需要细化"],
+        strengths: ["研究基础扎实"],
+        directions: [
+          { direction: "跨语言迁移学习", rationale: "多篇论文提到局限性", feasibility: 0.7 },
+        ],
+        citations: [
+          { original: "test", fixed: "Fixed Citation (2024).", missing: ["authors"] },
+        ],
+      }),
+    };
+  },
+};
 
 describe("SubmissionChecker", () => {
   const checker = new SubmissionChecker();
@@ -464,5 +491,161 @@ describe("CitationFixer", () => {
     ]);
 
     expect(result).toHaveLength(1);
+  });
+});
+
+// --- LLM-Enhanced Method Tests ---
+
+describe("SubmissionChecker LLM enhanced", () => {
+  const checker = new SubmissionChecker();
+
+  it("checkSubmissionEnhanced returns aiAnalysis from LLM", async () => {
+    const result = await checker.checkSubmissionEnhanced(
+      "This paper presents a novel approach with experimental validation.",
+      "IEEE",
+      mockLLM
+    );
+    expect(result.aiAnalysis.length).toBeGreaterThan(0);
+    expect(result.overallReadiness).toBe(85);
+  });
+
+  it("checkSubmissionEnhanced falls back on LLM error", async () => {
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await checker.checkSubmissionEnhanced("test content", "IEEE", badLLM);
+    expect(result.aiAnalysis).toEqual([]);
+    expect(result.overallReadiness).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("ReviewResponseEngine LLM enhanced", () => {
+  const engine = new ReviewResponseEngine();
+
+  it("createReviewResponseEnhanced returns aiDraftSections from LLM", async () => {
+    const result = await engine.createReviewResponseEnhanced(
+      "Reviewer 1: Major concern about methodology.",
+      "Our paper uses a novel deep learning approach...",
+      mockLLM
+    );
+    expect(result.aiDraftSections.length).toBeGreaterThan(0);
+    expect(result.aiDraftSections[0]!.responseText).toBeTruthy();
+  });
+
+  it("createReviewResponseEnhanced falls back on LLM error", async () => {
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await engine.createReviewResponseEnhanced("Major issue.", "paper", badLLM);
+    expect(result.aiDraftSections).toEqual([]);
+    expect(result.reviewComments.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ExperimentLogManager LLM enhanced", () => {
+  const manager = new ExperimentLogManager();
+
+  it("analyzeAnomalyEnhanced returns hypotheses and nextSteps", async () => {
+    const log = manager.createLog({
+      purpose: "Test reaction rate",
+      variables: [{ name: "temperature", type: "independent", value: "25C" }],
+      steps: [{ order: 1, description: "Mix reagents", duration: "10min", notes: "" }],
+    });
+    log.results = "Unexpected low yield observed";
+    log.analysis = "The reaction did not proceed as expected";
+
+    const result = await manager.analyzeAnomalyEnhanced(log, mockLLM);
+    expect(result.hypotheses.length).toBeGreaterThan(0);
+    expect(result.nextSteps.length).toBeGreaterThan(0);
+    expect(result.possibleCauses.length).toBeGreaterThan(0);
+  });
+
+  it("analyzeAnomalyEnhanced falls back on LLM error", async () => {
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const log = manager.createLog({ purpose: "Test" });
+    const result = await manager.analyzeAnomalyEnhanced(log, badLLM);
+    expect(result.hypotheses).toEqual([]);
+    expect(result.nextSteps).toEqual([]);
+  });
+});
+
+describe("GrantApplicationHelper LLM enhanced", () => {
+  const helper = new GrantApplicationHelper();
+
+  it("analyzeGrantEnhanced returns aiReview from LLM", async () => {
+    const application = {
+      id: "test",
+      projectId: "",
+      grantType: "NSFC",
+      sections: [
+        { type: "background" as const, title: "Background", content: "Previous research", completeness: 80, issues: [] },
+        { type: "innovation" as const, title: "Innovation", content: "Novel approach", completeness: 70, issues: [] },
+      ],
+      completeness: 75,
+      logicGaps: [],
+      evidenceGaps: [],
+    };
+    const result = await helper.analyzeGrantEnhanced(application, mockLLM);
+    expect(result.aiReview.length).toBeGreaterThan(0);
+    expect(result.completeness).toBe(75);
+  });
+
+  it("analyzeGrantEnhanced falls back on LLM error", async () => {
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const application = {
+      id: "test", projectId: "", grantType: "NSFC",
+      sections: [{ type: "background" as const, title: "BG", content: "Content", completeness: 50, issues: [] }],
+      completeness: 50, logicGaps: [], evidenceGaps: [],
+    };
+    const result = await helper.analyzeGrantEnhanced(application, badLLM);
+    expect(result.aiReview).toEqual([]);
+  });
+});
+
+describe("ResearchGapAnalyzer LLM enhanced", () => {
+  const analyzer = new ResearchGapAnalyzer();
+
+  it("analyzeGapsEnhanced returns aiDirections from LLM", async () => {
+    const papers = [
+      { title: "Paper A", limitations: "Limited to English", futureWork: "Extend to multilingual" },
+      { title: "Paper B", limitations: "High computational cost", futureWork: "Optimize efficiency" },
+    ];
+    const result = await analyzer.analyzeGapsEnhanced(papers, mockLLM);
+    expect(result.aiDirections.length).toBeGreaterThan(0);
+    expect(result.gaps.length).toBeGreaterThan(0);
+  });
+
+  it("analyzeGapsEnhanced falls back on LLM error", async () => {
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const papers = [
+      { title: "Paper A", limitations: "Limitation X", futureWork: "Future Y" },
+    ];
+    const result = await analyzer.analyzeGapsEnhanced(papers, badLLM);
+    expect(result.aiDirections).toEqual([]);
+    expect(result.gaps.length).toBeGreaterThan(0);
+  });
+});
+
+describe("CitationFixer LLM enhanced", () => {
+  const fixer = new CitationFixer();
+
+  it("fixCitationsEnhanced returns fixed citations from LLM for anomalies", async () => {
+    const citations = ["Short", "Another incomplete ref"];
+    const result = await fixer.fixCitationsEnhanced(citations, mockLLM);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0]!.style).toBe("AI补全");
+  });
+
+  it("fixCitationsEnhanced skips LLM when no anomalies", async () => {
+    const citations = [
+      "Smith, 2024, A very detailed and complete reference for the paper on deep learning methods",
+    ];
+    const result = await fixer.fixCitationsEnhanced(citations, mockLLM);
+    expect(result.length).toBe(1);
+    expect(result[0]!.confidence).toBeGreaterThan(0);
+  });
+
+  it("fixCitationsEnhanced falls back on LLM error", async () => {
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const citations = ["Short"];
+    const result = await fixer.fixCitationsEnhanced(citations, badLLM);
+    expect(result.length).toBe(1);
+    expect(result[0]!.fixed).toBeTruthy();
   });
 });

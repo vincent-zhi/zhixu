@@ -1,4 +1,4 @@
-import type { ExperimentLog, ExperimentVariable, ExperimentStep, ExperimentAnomaly } from "./types.js";
+import type { ExperimentLog, ExperimentVariable, ExperimentStep, ExperimentAnomaly, LLMCallable } from "./types.js";
 
 export class ExperimentLogManager {
   createLog(input: {
@@ -112,5 +112,24 @@ export class ExperimentLogManager {
     }
 
     return standardized;
+  }
+
+  async analyzeAnomalyEnhanced(
+    log: ExperimentLog,
+    llm: LLMCallable
+  ): Promise<ExperimentAnomaly & { hypotheses: string[]; nextSteps: string[] }> {
+    const basic = this.analyzeAnomaly(log);
+    try {
+      const result = await llm.chat({
+        system: `你是一位实验异常分析助手。根据实验记录，生成归因假设和排查步骤。
+返回 JSON：{"hypotheses": ["假设1：...", "..."], "nextSteps": ["步骤1：...", "..."]}`,
+        messages: [{ role: "user", content: `实验目的：${log.purpose}\n变量：${log.variables.map(v => `${v.name}=${v.value}`).join("、")}\n步骤：${log.steps.map(s => s.description).join("；")}\n结果：${log.results}\n分析：${log.analysis}\n已知问题：${log.issues.join("、")}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return { ...basic, hypotheses: parsed.hypotheses ?? [], nextSteps: parsed.nextSteps ?? [] };
+    } catch {
+      return { ...basic, hypotheses: [], nextSteps: [] };
+    }
   }
 }

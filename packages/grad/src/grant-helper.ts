@@ -1,4 +1,4 @@
-import type { GrantApplication, GrantSection } from "./types.js";
+import type { GrantApplication, GrantSection, LLMCallable } from "./types.js";
 
 const SECTION_CONNECTIONS: Record<string, string[]> = {
   background: ["innovation", "methodology"],
@@ -97,5 +97,25 @@ export class GrantApplicationHelper {
     }
 
     return gaps;
+  }
+
+  async analyzeGrantEnhanced(
+    application: GrantApplication,
+    llm: LLMCallable
+  ): Promise<{ logicGaps: string[]; evidenceGaps: string[]; completeness: number; aiReview: string[] }> {
+    const basic = this.analyzeGrant({ grantType: application.grantType, sections: application.sections });
+    try {
+      const result = await llm.chat({
+        system: `你是一位基金申报评审助手。评估课题申报书的逻辑完整性、创新点清晰度和技术路线可行性。
+返回 JSON：{"completeness": 0.0-1.0, "review": ["具体修改建议1", "..."], "strengths": ["优点1", "..."]}`,
+        messages: [{ role: "user", content: application.sections.map(s => `【${s.title}】\n${s.content}`).join("\n\n") }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      const aiCompleteness = parsed.completeness != null ? Math.round(parsed.completeness * 100) : basic.completeness;
+      return { ...basic, completeness: aiCompleteness, aiReview: parsed.review ?? [] };
+    } catch {
+      return { ...basic, aiReview: [] };
+    }
   }
 }

@@ -1,4 +1,4 @@
-import type { ReviewComment, ReviewActionItem, ResponseLetterSection, ReviewResponse } from "./types.js";
+import type { ReviewComment, ReviewActionItem, ResponseLetterSection, ReviewResponse, LLMCallable } from "./types.js";
 
 const MAJOR_KEYWORDS = ["major", "significant", "fundamental", "critical", "serious", "主要问题", "重大"];
 const MINOR_KEYWORDS = ["minor", "small", "typo", "formatting", "minor issue", "小问题", "格式"];
@@ -153,5 +153,31 @@ export class ReviewResponseEngine {
       responseLetter,
       overallStrategy,
     };
+  }
+
+  async createReviewResponseEnhanced(
+    rawReview: string,
+    paperContent: string,
+    llm: LLMCallable
+  ): Promise<ReviewResponse & { aiDraftSections: ResponseLetterSection[] }> {
+    const basic = this.createReviewResponse(rawReview);
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术论文返修助手。根据审稿意见和论文内容，生成逐条回复草稿。
+返回 JSON：{"sections": [{"reviewerComment": "...", "response": "...", "changes": "..."}], "overallStrategy": "..."}`,
+        messages: [{ role: "user", content: `审稿意见：\n${rawReview}\n\n论文内容（节选）：\n${paperContent.slice(0, 3000)}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      const sections: ResponseLetterSection[] = (parsed.sections ?? []).map((s: any) => ({
+        commentId: crypto.randomUUID(),
+        originalComment: s.reviewerComment ?? "",
+        responseText: s.response ?? "",
+        actionTaken: s.changes ?? "",
+      }));
+      return { ...basic, aiDraftSections: sections, overallStrategy: parsed.overallStrategy ?? basic.overallStrategy };
+    } catch {
+      return { ...basic, aiDraftSections: [] };
+    }
   }
 }

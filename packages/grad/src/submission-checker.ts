@@ -1,4 +1,4 @@
-import type { SubmissionChecklist, VenueRequirement, ChecklistItem } from "./types.js";
+import type { SubmissionChecklist, VenueRequirement, ChecklistItem, LLMCallable } from "./types.js";
 
 const VENUE_REQUIREMENTS: Record<string, Array<{ category: string; requirement: string }>> = {
   IEEE: [
@@ -77,5 +77,27 @@ export class SubmissionChecker {
       checks,
       overallReadiness,
     };
+  }
+
+  async checkSubmissionEnhanced(
+    content: string,
+    venue: string,
+    llm: LLMCallable,
+    customRequirements?: string[]
+  ): Promise<SubmissionChecklist & { aiAnalysis: string[] }> {
+    const basic = this.checkSubmission({ targetVenue: venue, artifactContent: content });
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术期刊投稿检查助手。检查论文内容是否满足投稿要求。
+返回 JSON：{"readiness": 0.0-1.0, "analysis": ["具体修改建议1", "..."], "missing": ["缺失项1", "..."]}`,
+        messages: [{ role: "user", content: `目标期刊/会议：${venue}\n${customRequirements ? `额外要求：${customRequirements.join("、")}\n` : ""}论文内容（节选）：\n${content.slice(0, 4000)}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      const aiReadiness = parsed.readiness != null ? Math.round(parsed.readiness * 100) : basic.overallReadiness;
+      return { ...basic, overallReadiness: aiReadiness, aiAnalysis: parsed.analysis ?? [] };
+    } catch {
+      return { ...basic, aiAnalysis: [] };
+    }
   }
 }

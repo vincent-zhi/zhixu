@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -13,7 +13,18 @@ import {
   verifyCitations,
   createVersion,
   listEvidence,
+  addEvidence,
   listVersions,
+  createArtifactBlock,
+  deleteArtifactBlock,
+  reorderArtifactBlocks,
+  executeAICommand,
+  generatePPTSlide,
+  generateAllSlides,
+  generateDocSection,
+  getVersionDiff,
+  rollbackVersion,
+  sensenovaGenerateImage,
 } from "../../api-client";
 import type {
   ProjectDetail,
@@ -24,9 +35,18 @@ import type {
   EvidenceSummary,
   VersionSummary,
   CitationVerificationResult,
+  VersionDiffResult,
 } from "../../api-client";
+import {
+  IconSpinner,
+  IconCheck,
+  IconDownload,
+  IconRefresh,
+  IconFile,
+} from "../../icons";
 
 type ArtifactKind = "ppt" | "document" | "literature" | "exam" | "experiment" | "other";
+type AICommand = "shorten" | "expand" | "formalize" | "add_example" | "add_citation" | "paraphrase";
 
 function detectArtifactKind(type: string): ArtifactKind {
   const t = type.toLowerCase();
@@ -49,6 +69,15 @@ function formatDt(iso: string | null): string {
   });
 }
 
+const AI_COMMANDS: Array<{ command: AICommand; label: string }> = [
+  { command: "shorten", label: "缩短" },
+  { command: "expand", label: "扩展" },
+  { command: "formalize", label: "学术化" },
+  { command: "add_example", label: "加案例" },
+  { command: "add_citation", label: "加引用" },
+  { command: "paraphrase", label: "改写" },
+];
+
 export default function ArtifactStudioPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -67,6 +96,24 @@ export default function ArtifactStudioPage() {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<"detail" | "version">("detail");
+  const [diffV1, setDiffV1] = useState<string | null>(null);
+  const [diffV2, setDiffV2] = useState<string | null>(null);
+  const [diffResult, setDiffResult] = useState<VersionDiffResult | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [evidencePageNumber, setEvidencePageNumber] = useState("");
+  const [evidenceTextSpan, setEvidenceTextSpan] = useState("");
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+
+  // SenseNova Image Generation state
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imageGenLoading, setImageGenLoading] = useState(false);
+  const [imageGenResult, setImageGenResult] = useState<string | null>(null);
+  const [showImageGen, setShowImageGen] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -141,6 +188,142 @@ export default function ArtifactStudioPage() {
     [currentArtifact, selectedBlock, loadData]
   );
 
+  const handleContentJsonUpdate = useCallback(
+    async (blockId: string, contentJson: Record<string, unknown>) => {
+      if (!currentArtifact) return;
+      try {
+        await updateArtifactBlock(currentArtifact.id, blockId, {
+          contentJson,
+          responsibilityColor: selectedBlock?.responsibilityColor ?? "yellow",
+          verificationStatus: selectedBlock?.verificationStatus ?? "unverified",
+          updatedBy: "current_user",
+        });
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "更新失败");
+      }
+    },
+    [currentArtifact, selectedBlock, loadData]
+  );
+
+  const handleAddBlock = useCallback(async () => {
+    if (!currentArtifact) return;
+    try {
+      const maxOrder = currentArtifact.blocks.reduce((max, b) => Math.max(max, b.orderIndex), -1);
+      await createArtifactBlock(currentArtifact.id, {
+        blockType: artifactKind === "ppt" ? "slide" : "paragraph",
+        contentJson: { text: "", title: artifactKind === "ppt" ? "新页面" : "" },
+        orderIndex: maxOrder + 1,
+        responsibilityColor: "gray",
+      });
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "添加失败");
+    }
+  }, [currentArtifact, artifactKind, loadData]);
+
+  const handleDeleteBlock = useCallback(
+    async (blockId: string) => {
+      if (!currentArtifact) return;
+      try {
+        await deleteArtifactBlock(currentArtifact.id, blockId);
+        if (selectedBlockId === blockId) {
+          setSelectedBlockId(null);
+        }
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "删除失败");
+      }
+    },
+    [currentArtifact, selectedBlockId, loadData]
+  );
+
+  const handleMoveBlock = useCallback(
+    async (blockId: string, direction: "up" | "down") => {
+      if (!currentArtifact) return;
+      const sorted = [...currentArtifact.blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+      const idx = sorted.findIndex((b) => b.id === blockId);
+      if (idx === -1) return;
+      if (direction === "up" && idx === 0) return;
+      if (direction === "down" && idx === sorted.length - 1) return;
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      const newSorted = [...sorted];
+      const a = newSorted[idx]!;
+      const b = newSorted[swapIdx]!;
+      newSorted[idx] = b;
+      newSorted[swapIdx] = a;
+      const blockIds = newSorted.map((b) => b.id);
+      try {
+        await reorderArtifactBlocks(currentArtifact.id, blockIds);
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "排序失败");
+      }
+    },
+    [currentArtifact, loadData]
+  );
+
+  const handleAICommand = useCallback(
+    async (command: AICommand) => {
+      if (!currentArtifact || !selectedBlock || !projectId) return;
+      try {
+        setAiLoading(true);
+        await executeAICommand(projectId, currentArtifact.id, selectedBlock.id, command);
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "AI命令执行失败");
+      } finally {
+        setAiLoading(false);
+      }
+    },
+    [currentArtifact, selectedBlock, projectId, loadData]
+  );
+
+  const handleGenerateSlide = useCallback(
+    async (blockId: string) => {
+      if (!currentArtifact || !projectId) return;
+      try {
+        setGenerating(true);
+        await generatePPTSlide(projectId, { artifactId: currentArtifact.id, blockId });
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "生成失败");
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [currentArtifact, projectId, loadData]
+  );
+
+  const handleGenerateAllSlides = useCallback(async () => {
+    if (!currentArtifact || !projectId) return;
+    try {
+      setGeneratingAll(true);
+      await generateAllSlides(projectId, { artifactId: currentArtifact.id });
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "批量生成失败");
+    } finally {
+      setGeneratingAll(false);
+    }
+  }, [currentArtifact, projectId, loadData]);
+
+  const handleGenerateSection = useCallback(
+    async (blockId: string) => {
+      if (!currentArtifact || !projectId) return;
+      try {
+        setGenerating(true);
+        await generateDocSection(projectId, { artifactId: currentArtifact.id, blockId });
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "生成失败");
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [currentArtifact, projectId, loadData]
+  );
+
   const handleExport = useCallback(
     async (format: "pptx" | "docx" | "markdown") => {
       if (!currentArtifact) return;
@@ -199,10 +382,136 @@ export default function ArtifactStudioPage() {
     }
   }, [currentArtifact, projectId, artifactId]);
 
+  const handleCompareVersions = useCallback(async () => {
+    if (!diffV1 || !diffV2 || !currentArtifact) return;
+    try {
+      setDiffLoading(true);
+      const result = await getVersionDiff("artifact", currentArtifact.id, diffV1, diffV2);
+      setDiffResult(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Diff对比失败");
+    } finally {
+      setDiffLoading(false);
+    }
+  }, [diffV1, diffV2, currentArtifact]);
+
+  const handleRollback = useCallback(async (versionId: string) => {
+    try {
+      await rollbackVersion(versionId);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "回滚失败");
+    }
+  }, [loadData]);
+
+  const handleGenerateImage = useCallback(async () => {
+    if (!imagePrompt.trim() || !selectedBlock || !currentArtifact) return;
+    try {
+      setImageGenLoading(true);
+      setImageGenResult(null);
+      const result = await sensenovaGenerateImage({ prompt: imagePrompt });
+      setImageGenResult(result?.imageUrl ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片生成失败");
+    } finally {
+      setImageGenLoading(false);
+    }
+  }, [imagePrompt, selectedBlock, currentArtifact]);
+
+  const handleInsertImage = useCallback(async () => {
+    if (!imageGenResult || !selectedBlock || !currentArtifact) return;
+    const existingText = (selectedBlock.contentJson.text as string) ?? "";
+    const imageMarkdown = `![配图](${imageGenResult})`;
+    await handleBlockUpdate(selectedBlock.id, existingText ? `${existingText}\n${imageMarkdown}` : imageMarkdown);
+    setImageGenResult(null);
+    setShowImageGen(false);
+    setImagePrompt("");
+  }, [imageGenResult, selectedBlock, currentArtifact, handleBlockUpdate]);
+
+  const handleBindEvidence = useCallback(
+    async (ev: EvidenceSummary) => {
+      if (!selectedBlock || !currentArtifact) return;
+      const existingRefs = Array.isArray(selectedBlock.contentJson["evidenceRefs"])
+        ? (selectedBlock.contentJson["evidenceRefs"] as string[])
+        : [];
+      if (existingRefs.includes(ev.id)) return;
+      await handleContentJsonUpdate(selectedBlock.id, {
+        ...selectedBlock.contentJson,
+        evidenceRefs: [...existingRefs, ev.id],
+      });
+    },
+    [selectedBlock, currentArtifact, handleContentJsonUpdate]
+  );
+
+  const handleBindEvidenceWithAnchoring = useCallback(
+    async (ev: EvidenceSummary) => {
+      if (!selectedBlock || !currentArtifact || !projectId) return;
+      const hasAnchoring = evidencePageNumber || evidenceTextSpan || evidenceUrl;
+      if (hasAnchoring) {
+        try {
+          const created = await addEvidence(projectId, {
+            ...(ev.sourceId ? { sourceId: ev.sourceId } : {}),
+            artifactId: artifactId,
+            blockId: selectedBlock.id,
+            evidenceType: ev.evidenceType,
+            ...(ev.quoteText ? { quoteText: ev.quoteText } : {}),
+            ...(evidencePageNumber || ev.pageNumber ? { pageNumber: evidencePageNumber ? Number(evidencePageNumber) : ev.pageNumber! } : {}),
+            ...(evidenceTextSpan || ev.textSpan ? { textSpan: (evidenceTextSpan || ev.textSpan!) as string } : {}),
+            confidence: ev.confidence,
+          });
+          const existingRefs = Array.isArray(selectedBlock.contentJson["evidenceRefs"])
+            ? (selectedBlock.contentJson["evidenceRefs"] as string[])
+            : [];
+          await handleContentJsonUpdate(selectedBlock.id, {
+            ...selectedBlock.contentJson,
+            evidenceRefs: [...existingRefs, created.id],
+          });
+          setEvidencePageNumber("");
+          setEvidenceTextSpan("");
+          setEvidenceUrl("");
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "带锚定绑定失败");
+        }
+      } else {
+        await handleBindEvidence(ev);
+      }
+    },
+    [selectedBlock, currentArtifact, projectId, artifactId, evidencePageNumber, evidenceTextSpan, evidenceUrl, handleContentJsonUpdate, handleBindEvidence]
+  );
+
   if (loading && !currentArtifact) {
     return (
       <main className="studio-shell">
-        <div className="workspace-loading">加载中…</div>
+        <header className="studio-header">
+          <div className="studio-header-info">
+            <p className="eyebrow">Artifact Studio</p>
+            <div className="skeleton skeleton-title" style={{ width: "40%" }} />
+            <div className="skeleton skeleton-text" style={{ width: "60%", marginTop: 8 }} />
+          </div>
+        </header>
+        <div className="studio-body">
+          <aside className="studio-console">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="console-section">
+                <div className="skeleton skeleton-text" style={{ width: "40%" }} />
+                <div className="skeleton skeleton-text" style={{ width: "70%" }} />
+              </div>
+            ))}
+          </aside>
+          <section className="studio-canvas">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="skeleton" style={{ height: 80, marginBottom: 12 }} />
+            ))}
+          </section>
+          <aside className="studio-inspector">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="inspector-section">
+                <div className="skeleton skeleton-text" style={{ width: "50%" }} />
+                <div className="skeleton skeleton-text" style={{ width: "80%" }} />
+              </div>
+            ))}
+          </aside>
+        </div>
       </main>
     );
   }
@@ -210,9 +519,12 @@ export default function ArtifactStudioPage() {
   if (error && !currentArtifact) {
     return (
       <main className="studio-shell">
-        <div className="workspace-error">
+        <div className="studio-error">
           <p>{error}</p>
-          <button onClick={loadData} className="btn-primary">重试</button>
+          <button onClick={loadData} className="btn-primary">
+            <IconRefresh size={16} />
+            重试
+          </button>
         </div>
       </main>
     );
@@ -221,7 +533,7 @@ export default function ArtifactStudioPage() {
   if (!currentArtifact) {
     return (
       <main className="studio-shell">
-        <div className="workspace-error">
+        <div className="studio-error">
           <p>未找到该交付物</p>
           {projectId && (
             <Link href={`/projects/${projectId}`} className="btn-primary">返回项目</Link>
@@ -236,13 +548,8 @@ export default function ArtifactStudioPage() {
   return (
     <main className="studio-shell">
       <header className="studio-header">
-        <Link
-          href={projectId ? `/projects/${projectId}` : "/"}
-          className="back-link"
-        >
-          ← 返回项目
-        </Link>
         <div className="studio-header-info">
+          <p className="eyebrow">Artifact Studio</p>
           <h1>{currentArtifact.title}</h1>
           <div className="studio-header-meta">
             <span className={`status-badge status-${currentArtifact.status}`}>
@@ -315,24 +622,43 @@ export default function ArtifactStudioPage() {
               </button>
               <button
                 className="console-action-btn"
+                onClick={handleAddBlock}
+              >
+                + 添加块
+              </button>
+              {artifactKind === "ppt" && (
+                <button
+                  className="console-action-btn"
+                  onClick={handleGenerateAllSlides}
+                  disabled={generatingAll}
+                >
+                  {generatingAll ? <IconSpinner size={14} /> : null}
+                  批量生成
+                </button>
+              )}
+              <button
+                className="console-action-btn"
                 onClick={() => handleExport("pptx")}
                 disabled={exporting}
               >
-                导出 PPTX
+                <IconDownload size={14} />
+                PPTX
               </button>
               <button
                 className="console-action-btn"
                 onClick={() => handleExport("docx")}
                 disabled={exporting}
               >
-                导出 DOCX
+                <IconDownload size={14} />
+                DOCX
               </button>
               <button
                 className="console-action-btn"
                 onClick={() => handleExport("markdown")}
                 disabled={exporting}
               >
-                导出 Markdown
+                <IconDownload size={14} />
+                MD
               </button>
             </div>
           </div>
@@ -358,16 +684,63 @@ export default function ArtifactStudioPage() {
             <div className="canvas-ppt">
               {sortedBlocks.map((block) => {
                 const isSelected = block.id === selectedBlockId;
+                const isEditingBlock = isSelected && editing;
                 return (
                   <div
                     key={block.id}
                     className={`canvas-slide ${isSelected ? "canvas-slide-selected" : ""}`}
-                    onClick={() => setSelectedBlockId(block.id)}
+                    onClick={() => {
+                      setSelectedBlockId(block.id);
+                      setEditing(false);
+                    }}
                   >
                     <div className={`canvas-slide-inner resp-border-${block.responsibilityColor}`}>
-                      <div className="slide-type-tag">{block.blockType}</div>
-                      <div className="slide-content">
-                        {(block.contentJson.text as string) ?? ""}
+                      <div className="block-toolbar">
+                        <span className="slide-type-tag">{block.blockType}</span>
+                        <div className="block-toolbar-actions">
+                          <button
+                            className="block-move-btn"
+                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, "up"); }}
+                            title="上移"
+                          >↑</button>
+                          <button
+                            className="block-move-btn"
+                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, "down"); }}
+                            title="下移"
+                          >↓</button>
+                          <button
+                            className="block-delete-btn"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
+                            title="删除"
+                          >×</button>
+                        </div>
+                      </div>
+                      <div className="slide-content canvas-block-editable">
+                        {isEditingBlock ? (
+                          <textarea
+                            ref={textareaRef}
+                            className="canvas-block-editing"
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => handleBlockUpdate(block.id, editContent)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") setEditing(false);
+                            }}
+                            autoFocus
+                          />
+                        ) : (
+                          <div
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setEditContent((block.contentJson.text as string) ?? "");
+                              setEditing(true);
+                            }}
+                          >
+                            <strong>{(block.contentJson.title as string) ?? ""}</strong>
+                            <p>{(block.contentJson.text as string) ?? ""}</p>
+                          </div>
+                        )}
                       </div>
                       <div className="slide-footer">
                         <span className={`status-badge status-${block.verificationStatus}`}>
@@ -376,11 +749,23 @@ export default function ArtifactStudioPage() {
                         <span className={`resp-tag resp-${block.responsibilityColor}`}>
                           {block.responsibilityColor}
                         </span>
+                        {!(block.contentJson.text as string) && (
+                          <button
+                            className="block-toolbar-btn"
+                            onClick={(e) => { e.stopPropagation(); handleGenerateSlide(block.id); }}
+                            disabled={generating}
+                          >
+                            {generating ? <IconSpinner size={12} /> : "生成"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
                 );
               })}
+              <button className="block-add-btn" onClick={handleAddBlock}>
+                + 添加页面
+              </button>
             </div>
           )}
 
@@ -388,22 +773,92 @@ export default function ArtifactStudioPage() {
             <div className="canvas-document">
               {sortedBlocks.map((block) => {
                 const isSelected = block.id === selectedBlockId;
+                const isEditingBlock = isSelected && editing;
                 return (
                   <div
                     key={block.id}
                     className={`canvas-paragraph ${isSelected ? "canvas-paragraph-selected" : ""}`}
-                    onClick={() => setSelectedBlockId(block.id)}
+                    onClick={() => {
+                      setSelectedBlockId(block.id);
+                      setEditing(false);
+                    }}
                   >
                     <div className={`paragraph-resp-bar resp-bg-${block.responsibilityColor}`} />
                     <div className="paragraph-body">
-                      <div className="paragraph-type">{block.blockType}</div>
-                      <div className="paragraph-text">
-                        {(block.contentJson.text as string) ?? ""}
+                      <div className="block-toolbar">
+                        <div className="paragraph-type">{block.blockType}</div>
+                        <div className="block-toolbar-actions">
+                          <button
+                            className="block-move-btn"
+                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, "up"); }}
+                            title="上移"
+                          >↑</button>
+                          <button
+                            className="block-move-btn"
+                            onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, "down"); }}
+                            title="下移"
+                          >↓</button>
+                          <button
+                            className="block-delete-btn"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
+                            title="删除"
+                          >×</button>
+                        </div>
+                      </div>
+                      <div className="paragraph-text canvas-block-editable">
+                        {isEditingBlock ? (
+                          <textarea
+                            ref={textareaRef}
+                            className="canvas-block-editing"
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => handleBlockUpdate(block.id, editContent)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") setEditing(false);
+                            }}
+                            autoFocus
+                          />
+                        ) : (
+                          <div
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setEditContent((block.contentJson.text as string) ?? "");
+                              setEditing(true);
+                            }}
+                          >
+                            {block.blockType === "heading" ? (
+                              <strong>{(block.contentJson.text as string) ?? ""}</strong>
+                            ) : (
+                              <p>{(block.contentJson.text as string) ?? ""}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="paragraph-meta">
+                        <span className={`resp-tag resp-${block.responsibilityColor}`}>
+                          {block.responsibilityColor}
+                        </span>
+                        <span className={`status-badge status-${block.verificationStatus}`}>
+                          {block.verificationStatus}
+                        </span>
+                        {block.blockType === "paragraph" && !(block.contentJson.text as string) && (
+                          <button
+                            className="block-toolbar-btn"
+                            onClick={(e) => { e.stopPropagation(); handleGenerateSection(block.id); }}
+                            disabled={generating}
+                          >
+                            {generating ? <IconSpinner size={12} /> : "生成"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
                 );
               })}
+              <button className="block-add-btn" onClick={handleAddBlock}>
+                + 添加段落
+              </button>
             </div>
           )}
 
@@ -417,6 +872,7 @@ export default function ArtifactStudioPage() {
                     <th>内容</th>
                     <th>权责</th>
                     <th>核验</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -424,12 +880,34 @@ export default function ArtifactStudioPage() {
                     <tr
                       key={block.id}
                       className={`lit-row ${block.id === selectedBlockId ? "lit-row-selected" : ""}`}
-                      onClick={() => setSelectedBlockId(block.id)}
+                      onClick={() => {
+                        setSelectedBlockId(block.id);
+                        setEditing(false);
+                      }}
                     >
                       <td>{block.blockType}</td>
                       <td>{(block.contentJson.type as string) ?? "—"}</td>
-                      <td className="lit-content">
-                        {(block.contentJson.text as string) ?? ""}
+                      <td className="lit-content canvas-block-editable">
+                        {selectedBlockId === block.id && editing ? (
+                          <textarea
+                            className="canvas-block-editing"
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onBlur={() => handleBlockUpdate(block.id, editContent)}
+                            autoFocus
+                          />
+                        ) : (
+                          <div
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setEditContent((block.contentJson.text as string) ?? "");
+                              setEditing(true);
+                            }}
+                          >
+                            {(block.contentJson.text as string) ?? ""}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <span className={`resp-tag resp-${block.responsibilityColor}`}>
@@ -441,79 +919,78 @@ export default function ArtifactStudioPage() {
                           {block.verificationStatus}
                         </span>
                       </td>
+                      <td>
+                        <button
+                          className="block-delete-btn"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
+                        >×</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <button className="block-add-btn" onClick={handleAddBlock}>
+                + 添加条目
+              </button>
             </div>
           )}
 
-          {artifactKind === "exam" && (
-            <div className="canvas-exam">
-              {sortedBlocks.map((block) => {
-                const isSelected = block.id === selectedBlockId;
-                return (
-                  <div
-                    key={block.id}
-                    className={`exam-question ${isSelected ? "exam-question-selected" : ""}`}
-                    onClick={() => setSelectedBlockId(block.id)}
-                  >
-                    <div className="exam-q-type">{block.blockType}</div>
-                    <div className="exam-q-text">
-                      {(block.contentJson.text as string) ?? ""}
-                    </div>
-                    <div className="exam-q-meta">
-                      <span className={`resp-tag resp-${block.responsibilityColor}`}>
-                        {block.responsibilityColor}
-                      </span>
-                      <span className={`status-badge status-${block.verificationStatus}`}>
-                        {block.verificationStatus}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {artifactKind === "experiment" && (
-            <div className="canvas-experiment">
-              {sortedBlocks.map((block) => {
-                const isSelected = block.id === selectedBlockId;
-                return (
-                  <div
-                    key={block.id}
-                    className={`experiment-entry ${isSelected ? "experiment-entry-selected" : ""}`}
-                    onClick={() => setSelectedBlockId(block.id)}
-                  >
-                    <div className="exp-field">{block.blockType}</div>
-                    <div className="exp-value">
-                      {(block.contentJson.text as string) ?? ""}
-                    </div>
-                    <div className="exp-meta">
-                      <span className={`resp-tag resp-${block.responsibilityColor}`}>
-                        {block.responsibilityColor}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {artifactKind === "other" && (
+          {(artifactKind === "exam" || artifactKind === "experiment" || artifactKind === "other") && (
             <div className="canvas-generic">
               {sortedBlocks.map((block) => {
                 const isSelected = block.id === selectedBlockId;
+                const isEditingBlock = isSelected && editing;
                 return (
                   <div
                     key={block.id}
                     className={`generic-block ${isSelected ? "generic-block-selected" : ""}`}
-                    onClick={() => setSelectedBlockId(block.id)}
+                    onClick={() => {
+                      setSelectedBlockId(block.id);
+                      setEditing(false);
+                    }}
                   >
-                    <div className="generic-block-type">{block.blockType}</div>
-                    <div className="generic-block-text">
-                      {(block.contentJson.text as string) ?? ""}
+                    <div className="block-toolbar">
+                      <div className="generic-block-type">{block.blockType}</div>
+                      <div className="block-toolbar-actions">
+                        <button
+                          className="block-move-btn"
+                          onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, "up"); }}
+                        >↑</button>
+                        <button
+                          className="block-move-btn"
+                          onClick={(e) => { e.stopPropagation(); handleMoveBlock(block.id, "down"); }}
+                        >↓</button>
+                        <button
+                          className="block-delete-btn"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
+                        >×</button>
+                      </div>
+                    </div>
+                    <div className="generic-block-text canvas-block-editable">
+                      {isEditingBlock ? (
+                        <textarea
+                          ref={textareaRef}
+                          className="canvas-block-editing"
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={() => handleBlockUpdate(block.id, editContent)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setEditing(false);
+                          }}
+                          autoFocus
+                        />
+                      ) : (
+                        <div
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setEditContent((block.contentJson.text as string) ?? "");
+                            setEditing(true);
+                          }}
+                        >
+                          {(block.contentJson.text as string) ?? ""}
+                        </div>
+                      )}
                     </div>
                     <div className="generic-block-meta">
                       <span className={`resp-tag resp-${block.responsibilityColor}`}>
@@ -526,12 +1003,141 @@ export default function ArtifactStudioPage() {
                   </div>
                 );
               })}
+              <button className="block-add-btn" onClick={handleAddBlock}>
+                + 添加块
+              </button>
             </div>
           )}
         </section>
 
         <aside className="studio-inspector">
-          {selectedBlock ? (
+          <div className="inspector-tabs">
+            <button
+              className={`inspector-tab ${inspectorTab === "detail" ? "inspector-tab-active" : ""}`}
+              onClick={() => setInspectorTab("detail")}
+            >
+              详情
+            </button>
+            <button
+              className={`inspector-tab ${inspectorTab === "version" ? "inspector-tab-active" : ""}`}
+              onClick={() => setInspectorTab("version")}
+            >
+              版本
+            </button>
+          </div>
+
+          {inspectorTab === "version" && (
+            <div className="diff-panel">
+              <div className="diff-version-list">
+                <div className="inspector-label">版本历史</div>
+                {versions.length === 0 && (
+                  <div className="console-empty">暂无版本</div>
+                )}
+                {versions.map((v) => (
+                  <div
+                    key={v.id}
+                    className={`diff-version-item ${diffV1 === v.id ? "diff-version-selected diff-v1" : ""} ${diffV2 === v.id ? "diff-version-selected diff-v2" : ""}`}
+                  >
+                    <div className="diff-version-info">
+                      <span className="version-reason">{v.createdReason}</span>
+                      <span className="version-time">{formatDt(v.createdAt)}</span>
+                      <span className="diff-version-author">{v.createdBy}</span>
+                    </div>
+                    <div className="diff-version-actions">
+                      <button
+                        className={`diff-select-btn ${diffV1 === v.id ? "diff-select-v1" : ""}`}
+                        onClick={() => setDiffV1(diffV1 === v.id ? null : v.id)}
+                      >
+                        V1
+                      </button>
+                      <button
+                        className={`diff-select-btn ${diffV2 === v.id ? "diff-select-v2" : ""}`}
+                        onClick={() => setDiffV2(diffV2 === v.id ? null : v.id)}
+                      >
+                        V2
+                      </button>
+                      <button
+                        className="diff-rollback-btn"
+                        onClick={() => handleRollback(v.id)}
+                      >
+                        回滚
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="diff-compare">
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={handleCompareVersions}
+                  disabled={!diffV1 || !diffV2 || diffLoading}
+                >
+                  {diffLoading ? <IconSpinner size={14} /> : "对比差异"}
+                </button>
+                {diffV1 && diffV2 && (
+                  <button
+                    className="btn-secondary btn-sm"
+                    onClick={() => { setDiffResult(null); setDiffV1(null); setDiffV2(null); }}
+                  >
+                    清除选择
+                  </button>
+                )}
+              </div>
+
+              {diffResult && (
+                <div className="diff-result">
+                  <div className="diff-summary">
+                    <span className="diff-stat diff-stat-added">+{diffResult.summary.added} 新增</span>
+                    <span className="diff-stat diff-stat-modified">~{diffResult.summary.modified} 修改</span>
+                    <span className="diff-stat diff-stat-removed">-{diffResult.summary.deleted} 删除</span>
+                  </div>
+
+                  {diffResult.additions.length > 0 && (
+                    <div className="diff-section">
+                      <div className="inspector-label">新增内容</div>
+                      {diffResult.additions.map((item, i) => (
+                        <div key={i} className="diff-line diff-added">
+                          <span className="diff-field">{item.field}</span>
+                          <span className="diff-value">{JSON.stringify(item.value, null, 2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {diffResult.modifications.length > 0 && (
+                    <div className="diff-section">
+                      <div className="inspector-label">修改内容</div>
+                      {diffResult.modifications.map((item, i) => (
+                        <div key={i} className="diff-line diff-modified">
+                          <span className="diff-field">{item.field}</span>
+                          <div className="diff-values">
+                            <span className="diff-old">{JSON.stringify(item.oldValue, null, 2)}</span>
+                            <span className="diff-new">{JSON.stringify(item.newValue, null, 2)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {diffResult.deletions.length > 0 && (
+                    <div className="diff-section">
+                      <div className="inspector-label">删除内容</div>
+                      {diffResult.deletions.map((item, i) => (
+                        <div key={i} className="diff-line diff-removed">
+                          <span className="diff-field">{item.field}</span>
+                          <span className="diff-value">{JSON.stringify(item.value, null, 2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {inspectorTab === "detail" && (
+            selectedBlock ? (
             <>
               <div className="inspector-section">
                 <div className="inspector-label">当前块目标</div>
@@ -556,12 +1162,12 @@ export default function ArtifactStudioPage() {
 
               <div className="inspector-section">
                 <div className="inspector-label">关联证据</div>
-                <div className="inspector-evidence-list">
+                <div className="evidence-bind-list">
                   {blockEvidence.length === 0 && (
                     <div className="inspector-empty">无关联证据</div>
                   )}
                   {blockEvidence.map((e) => (
-                    <div key={e.id} className={`inspector-evidence-item resp-border-${e.responsibilityColor}`}>
+                    <div key={e.id} className={`evidence-bind-item resp-border-${e.responsibilityColor}`}>
                       <strong>{e.evidenceType}</strong>
                       {e.quoteText && (
                         <p className="inspector-evidence-quote">"{e.quoteText}"</p>
@@ -569,6 +1175,53 @@ export default function ArtifactStudioPage() {
                       <span>置信度：{Math.round(e.confidence * 100)}%</span>
                     </div>
                   ))}
+                  {evidence.filter((e) => e.artifactId !== artifactId || e.blockId !== selectedBlockId).length > 0 && (
+                    <div className="evidence-anchor-fields">
+                      <label style={{ fontSize: 12, color: "var(--color-text-secondary)", display: "block", marginBottom: 4 }}>
+                        来源锚定（可选）
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="页码"
+                        value={evidencePageNumber}
+                        onChange={(e) => setEvidencePageNumber(e.target.value)}
+                        style={{ width: "100%", padding: "4px 8px", border: "1px solid var(--color-border-card)", borderRadius: "var(--radius-sm)", fontSize: 13, marginBottom: 6 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="段落/引用文本"
+                        value={evidenceTextSpan}
+                        onChange={(e) => setEvidenceTextSpan(e.target.value)}
+                        style={{ width: "100%", padding: "4px 8px", border: "1px solid var(--color-border-card)", borderRadius: "var(--radius-sm)", fontSize: 13, marginBottom: 6 }}
+                      />
+                      <input
+                        type="url"
+                        placeholder="外部来源 URL"
+                        value={evidenceUrl}
+                        onChange={(e) => setEvidenceUrl(e.target.value)}
+                        style={{ width: "100%", padding: "4px 8px", border: "1px solid var(--color-border-card)", borderRadius: "var(--radius-sm)", fontSize: 13, marginBottom: 6 }}
+                      />
+                    </div>
+                  )}
+                  {evidence.filter((e) => e.artifactId !== artifactId || e.blockId !== selectedBlockId).length > 0 && (
+                    <div className="evidence-bind-section">
+                      <div className="inspector-label">可绑定证据</div>
+                      {evidence
+                        .filter((e) => e.artifactId !== artifactId || e.blockId !== selectedBlockId)
+                        .slice(0, 5)
+                        .map((e) => (
+                          <div
+                            key={e.id}
+                            className="evidence-bind-item evidence-bind-available"
+                            onClick={() => handleBindEvidenceWithAnchoring(e)}
+                          >
+                            <strong>{e.evidenceType}</strong>
+                            {e.quoteText && <span>"{e.quoteText.slice(0, 40)}…"</span>}
+                            <span className="evidence-bind-action">绑定</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -610,6 +1263,7 @@ export default function ArtifactStudioPage() {
                         className="btn-primary btn-sm"
                         onClick={() => handleBlockUpdate(selectedBlock.id, editContent)}
                       >
+                        <IconCheck size={14} />
                         保存
                       </button>
                       <button
@@ -636,15 +1290,33 @@ export default function ArtifactStudioPage() {
                 )}
               </div>
 
+              <div className="inspector-section">
+                <div className="inspector-label">AI 命令</div>
+                <div className="ai-command-menu">
+                  {AI_COMMANDS.map((cmd) => (
+                    <button
+                      key={cmd.command}
+                      className="ai-command-item"
+                      onClick={() => handleAICommand(cmd.command)}
+                      disabled={aiLoading}
+                    >
+                      {aiLoading ? <IconSpinner size={12} /> : cmd.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {artifactKind === "ppt" && (
                 <div className="inspector-section">
                   <div className="inspector-label">PPT 操作</div>
                   <div className="inspector-ppt-actions">
                     <button
                       className="console-action-btn"
-                      onClick={() => handleBlockUpdate(selectedBlock.id, "")}
+                      onClick={() => handleGenerateSlide(selectedBlock.id)}
+                      disabled={generating}
                     >
-                      重写本页
+                      {generating ? <IconSpinner size={14} /> : <IconRefresh size={14} />}
+                      生成本页
                     </button>
                     <button
                       className="console-action-btn"
@@ -655,6 +1327,65 @@ export default function ArtifactStudioPage() {
                       }}
                     >
                       缩短内容
+                    </button>
+                    <button
+                      className="console-action-btn"
+                      onClick={() => setShowImageGen(!showImageGen)}
+                    >
+                      生成配图
+                    </button>
+                  </div>
+                  {showImageGen && (
+                    <div style={{ marginTop: 8 }}>
+                      <input
+                        type="text"
+                        placeholder="描述你想要的配图..."
+                        value={imagePrompt}
+                        onChange={(e) => setImagePrompt(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleGenerateImage(); }}
+                        style={{ width: "100%", padding: "6px 10px", border: "1px solid var(--color-border-card)", borderRadius: "var(--radius-sm)", fontSize: 13, marginBottom: 6 }}
+                      />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          className="btn-primary btn-sm"
+                          onClick={handleGenerateImage}
+                          disabled={imageGenLoading || !imagePrompt.trim()}
+                        >
+                          {imageGenLoading ? <IconSpinner size={14} /> : "生成"}
+                        </button>
+                        <button
+                          className="btn-secondary btn-sm"
+                          onClick={() => { setShowImageGen(false); setImageGenResult(null); setImagePrompt(""); }}
+                        >
+                          取消
+                        </button>
+                      </div>
+                      {imageGenResult && (
+                        <div style={{ marginTop: 8, border: "1px solid var(--color-border-card)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+                          <img src={imageGenResult} alt="生成的配图" style={{ width: "100%", display: "block" }} />
+                          <div style={{ padding: 6, display: "flex", gap: 6 }}>
+                            <button className="btn-primary btn-sm" onClick={handleInsertImage}>
+                              插入到当前块
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {artifactKind === "document" && selectedBlock.blockType === "paragraph" && (
+                <div className="inspector-section">
+                  <div className="inspector-label">段落操作</div>
+                  <div className="inspector-ppt-actions">
+                    <button
+                      className="console-action-btn"
+                      onClick={() => handleGenerateSection(selectedBlock.id)}
+                      disabled={generating}
+                    >
+                      {generating ? <IconSpinner size={14} /> : <IconRefresh size={14} />}
+                      生成内容
                     </button>
                   </div>
                 </div>
@@ -672,8 +1403,10 @@ export default function ArtifactStudioPage() {
             </>
           ) : (
             <div className="inspector-empty-state">
+              <IconFile size={32} style={{ color: "var(--color-text-muted)", marginBottom: 12 }} />
               选择一个内容块查看详情
             </div>
+          )
           )}
         </aside>
       </div>

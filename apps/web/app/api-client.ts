@@ -1402,3 +1402,144 @@ export async function saveImageConfig(input: { provider: string; apiKey: string;
 export async function deleteImageConfig(): Promise<void> {
   await request<{ data: { configured: boolean } }>("/api/settings/image", { method: "DELETE" });
 }
+
+export async function sensenovaSearchAcademic(query: string, platforms?: string[]) {
+  return request<any>("/api/sensenova/skills/sn-search-academic/invoke", {
+    method: "POST",
+    body: JSON.stringify({ query, platforms }),
+  });
+}
+
+export async function sensenovaDeepResearch(topic: string, projectId?: string) {
+  return request<any>("/api/sensenova/skills/sn-deep-research/invoke", {
+    method: "POST",
+    body: JSON.stringify({ topic, projectId }),
+  });
+}
+
+export async function sensenovaPPTGenerate(prompt: string, mode: "creative" | "standard", slides?: number) {
+  return request<any>("/api/sensenova/skills/sn-ppt-entry/invoke", {
+    method: "POST",
+    body: JSON.stringify({ prompt, mode, slides }),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Collaboration (project sharing, knowledge base, progress board, contributions)
+// ─────────────────────────────────────────────────────────────
+
+export interface ProjectShareSummary {
+  id: string;
+  projectId: string;
+  sharedBy: string;
+  shareType: "read_only" | "comment" | "edit";
+  recipientIds: string[];
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateShareInput {
+  sharedBy: string;
+  shareType: "read_only" | "comment" | "edit";
+  recipientIds: string[];
+  expiresAt?: string;
+}
+
+export interface KnowledgebaseEntrySummary {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  contributedBy: string;
+  sensitive: boolean;
+  createdAt: string;
+}
+
+export interface ProgressBoardSummary {
+  id: string;
+  projectId: string;
+  columns: Array<{ id: string; title: string; taskIds: string[]; orderIndex: number }>;
+  lastUpdated: string;
+}
+
+export interface MemberContributionSummary {
+  memberId: string;
+  memberName: string;
+  tasksCompleted: number;
+  tasksTotal: number;
+  artifactsContributed: number;
+  blocksEdited: number;
+  hoursEstimated: number;
+  contributionPercent: number;
+}
+
+export interface ContributionReportSummary {
+  id: string;
+  projectId: string;
+  period: { start: string; end: string };
+  members: MemberContributionSummary[];
+  summary: string;
+}
+
+export async function createProjectShare(projectId: string, input: CreateShareInput): Promise<ProjectShareSummary> {
+  return request<ProjectShareSummary>(`/api/projects/${projectId}/collab/shares`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listProjectShares(projectId: string): Promise<ProjectShareSummary[]> {
+  return request<ProjectShareSummary[]>(`/api/projects/${projectId}/collab/shares`);
+}
+
+export async function revokeProjectShare(projectId: string, shareId: string): Promise<{ revoked: boolean }> {
+  return request<{ revoked: boolean }>(`/api/projects/${projectId}/collab/shares/${shareId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createKnowledgebase(projectId: string, input: { name?: string; accessPolicy?: "lab_only" | "course_only" | "team_only" | "public" }): Promise<any> {
+  return request<any>(`/api/projects/${projectId}/collab/knowledgebase`, {
+    method: "POST",
+    body: JSON.stringify({ action: "create", ...input }),
+  });
+}
+
+export async function addKnowledgebaseEntry(projectId: string, entry: { title: string; content: string; category: string; contributedBy: string; sensitive: boolean }): Promise<KnowledgebaseEntrySummary> {
+  return request<KnowledgebaseEntrySummary>(`/api/projects/${projectId}/collab/knowledgebase`, {
+    method: "POST",
+    body: JSON.stringify({ action: "add_entry", entry }),
+  });
+}
+
+export async function listKnowledgebaseEntries(projectId: string): Promise<KnowledgebaseEntrySummary[]> {
+  return request<KnowledgebaseEntrySummary[]>(`/api/projects/${projectId}/collab/knowledgebase`);
+}
+
+export async function getProgressBoard(projectId: string): Promise<ProgressBoardSummary> {
+  return request<ProgressBoardSummary>(`/api/projects/${projectId}/collab/progress-board`);
+}
+
+export async function addProgressColumn(projectId: string, title: string): Promise<{ id: string; title: string; taskIds: string[]; orderIndex: number }> {
+  return request<{ id: string; title: string; taskIds: string[]; orderIndex: number }>(`/api/projects/${projectId}/collab/progress-board`, {
+    method: "POST",
+    body: JSON.stringify({ action: "add_column", title }),
+  });
+}
+
+export async function moveProgressTask(projectId: string, taskId: string, targetColumnId: string): Promise<ProgressBoardSummary> {
+  return request<ProgressBoardSummary>(`/api/projects/${projectId}/collab/progress-board`, {
+    method: "POST",
+    body: JSON.stringify({ action: "move_task", taskId, targetColumnId }),
+  });
+}
+
+export async function getContributionReport(projectId: string, params?: { start?: string; end?: string; members?: Array<{ id: string; name: string }>; activities?: Array<{ memberId: string; type: string; hoursSpent: number }> }): Promise<ContributionReportSummary> {
+  const query = new URLSearchParams();
+  if (params?.start) query.set("start", params.start);
+  if (params?.end) query.set("end", params.end);
+  if (params?.members) query.set("members", JSON.stringify(params.members));
+  if (params?.activities) query.set("activities", JSON.stringify(params.activities));
+  const qs = query.toString();
+  return request<ContributionReportSummary>(`/api/projects/${projectId}/collab/contributions${qs ? `?${qs}` : ""}`);
+}

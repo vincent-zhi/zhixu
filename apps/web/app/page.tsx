@@ -4,13 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import {
   ApiClientError,
   chat,
+  chatStream,
   confirmHumanGate,
   createProject,
+  generateAllSlides,
+  exportArtifactPptx,
+  listArtifactBlocks,
   postProjectEvent,
   type ChatResult,
+  type ArtifactBlockSummary,
 } from "./api-client";
+import { useChat, type Msg } from "./chat-context";
 import {
   IconBook,
+  IconBrain,
   IconCheck,
   IconChevronRight,
   IconDocument,
@@ -27,11 +34,11 @@ import {
 
 type ToolCallInfo = { name: string; result?: string; loading?: boolean };
 
-type Msg =
-  | { role: "user"; content: string }
-  | { role: "assistant"; content: string; toolCalls?: ToolCallInfo[] }
-  | { role: "gate"; gateId: string; gateType: string; reason: string; riskLevel: string; resolved: boolean }
-  | { role: "system"; content: string };
+type CanvasPanelState = {
+  type: "ppt";
+  artifactId: string;
+  projectId: string;
+} | null;
 
 const SUGGESTIONS = [
   { icon: IconPPT, label: "做 PPT", desc: "解析资料，生成选题、大纲和逐页共创", prompt: "帮我做一份课程 PPT，需要先给我 3 个选题方向" },
@@ -40,6 +47,7 @@ const SUGGESTIONS = [
   { icon: IconExam, label: "备考", desc: "重排计划，生成题目和错题归因", prompt: "帮我制定期末复习计划，按风险和掌握度排序" },
   { icon: IconExperiment, label: "实验", desc: "记录参数、异常归因和下次计划", prompt: "帮我整理实验记录，并生成下次实验计划" },
   { icon: IconFeedback, label: "导师反馈", desc: "拆解意见，绑定位置，追踪整改", prompt: "导师给了修改意见，帮我拆成可执行清单" },
+  { icon: IconBrain, label: "深度研究", desc: "跨多源取证、多维度对比、交叉验证，生成研究报告", prompt: "[深度研究] 请帮我对以下课题进行深度研究，覆盖规划、取证、综合、成稿全流程" },
 ];
 
 const SKILL_LABELS: Record<string, string> = {
@@ -58,6 +66,19 @@ const SKILL_LABELS: Record<string, string> = {
   skill_citation_verify: "引用核验",
   skill_risk_assess: "风险评估",
   thinking: "理解任务",
+  read_file: "读取文件",
+  write_file: "写入文件",
+  patch: "编辑文件",
+  list_dir: "查看目录",
+  search_files: "搜索文件",
+  terminal: "执行命令",
+  web_search: "联网搜索",
+  web_extract: "提取网页",
+  execute_code: "执行代码",
+  create_pptx: "生成 PPT",
+  create_docx: "生成文档",
+  delete_file: "删除文件",
+  append_file: "追加内容",
 };
 
 function getSkillLabel(name: string): string {
@@ -139,15 +160,143 @@ function ToolCallCard({ toolCall, index }: { toolCall: ToolCallInfo; index: numb
   );
 }
 
+function PPTCanvasPanel({ projectId, artifactId, onClose }: { projectId: string; artifactId: string; onClose: () => void }) {
+  const [blocks, setBlocks] = useState<ArtifactBlockSummary[]>([]);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    listArtifactBlocks(artifactId)
+      .then((d) => {
+        setBlocks(d);
+        if (d.length > 0) setSelectedBlockId(d[0]!.id);
+      })
+      .catch(() => {});
+  }, [artifactId]);
+
+  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null;
+
+  const handleGenerateAll = async () => {
+    setGenerating(true);
+    try {
+      const result = await generateAllSlides(projectId, { artifactId });
+      setBlocks(result);
+      if (result.length > 0 && !selectedBlockId) setSelectedBlockId(result[0]!.id);
+    } catch {}
+    setGenerating(false);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportArtifactPptx(artifactId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "presentation.pptx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {}
+    setExporting(false);
+  };
+
+  return (
+    <div className="ppt-canvas-panel">
+      <div className="ppt-canvas-header">
+        <h3>PPT 共创</h3>
+        <button type="button" className="ppt-canvas-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="ppt-canvas-body">
+        <div className="ppt-outline">
+          {blocks.length === 0 && (
+            <div className="ppt-outline-empty">暂无页面，请先生成大纲</div>
+          )}
+          {blocks.map((block, i) => (
+            <div
+              key={block.id}
+              className={`ppt-outline-item${selectedBlockId === block.id ? " ppt-outline-item-selected" : ""}`}
+              onClick={() => setSelectedBlockId(block.id)}
+            >
+              <span className="ppt-slide-num">{i + 1}</span>
+              <span className="ppt-slide-title">{(block.contentJson as Record<string, unknown>)?.title as string ?? `第${i + 1}页`}</span>
+            </div>
+          ))}
+        </div>
+        <div className="ppt-preview">
+          {selectedBlock ? (
+            <div className="ppt-slide-preview">
+              <div className="ppt-slide-preview-title">
+                {(selectedBlock.contentJson as Record<string, unknown>)?.title as string ?? ""}
+              </div>
+              <div className="ppt-slide-preview-text">
+                {((selectedBlock.contentJson as Record<string, unknown>)?.text as string ?? "")
+                  .split("\n")
+                  .map((line, i) => (
+                    <div key={i} className="ppt-slide-bullet">{line.replace(/^[•\-\*]\s*/, "")}</div>
+                  ))}
+              </div>
+              {!(selectedBlock.contentJson as Record<string, unknown>)?.text && (
+                <div className="ppt-slide-preview-outline">
+                  大纲：{(selectedBlock.contentJson as Record<string, unknown>)?.outline as string ?? "待生成"}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="ppt-preview-empty">选择一页查看预览</div>
+          )}
+        </div>
+      </div>
+      <div className="ppt-canvas-actions">
+        <button type="button" className="btn-primary" onClick={handleGenerateAll} disabled={generating}>
+          {generating ? "生成中..." : "生成全部页面"}
+        </button>
+        <button type="button" className="btn-secondary" onClick={handleExport} disabled={blocks.length === 0 || exporting}>
+          {exporting ? "导出中..." : "导出 PPTX"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function HomePage() {
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const { session, setSession, addMessage, updateLastAssistant, clearSession, setStreaming } = useChat();
+  const { messages, projectId } = session;
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [canvasPanel, setCanvasPanel] = useState<CanvasPanelState>(null);
+  const [converting, setConverting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const thinkingRef = useRef("");
+  const contentRef = useRef("");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleConvertToDoc = useCallback(async () => {
+    if (messages.length === 0) return;
+    setConverting(true);
+    try {
+      const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+      const res = await fetch(`${BASE_URL}/api/chat/to-document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: messages.filter(m => "content" in m).map(m => ({ role: m.role, content: (m as { content?: string }).content ?? "" })) }),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const artifactId = body.data?.artifactId;
+        const projId = body.data?.projectId;
+        if (artifactId) {
+          window.location.href = `/studio/${artifactId}${projId ? `?projectId=${projId}` : ""}`;
+        }
+      }
+    } catch (e) {
+      console.error("Convert to doc failed:", e);
+    } finally {
+      setConverting(false);
+    }
   }, [messages]);
 
   const ensureProject = useCallback(async (firstMessage: string): Promise<string> => {
@@ -161,10 +310,10 @@ export default function HomePage() {
       privacyMode: "cloud",
       riskLevel: "L1",
     });
-    setProjectId(project.id);
+    setSession({ ...session, projectId: project.id });
     await postProjectEvent(project.id, { eventType: "user_goal_submitted", actorId: "user" }).catch(() => {});
     return project.id;
-  }, [projectId]);
+  }, [projectId, session, setSession]);
 
   const handleSend = useCallback(async (text?: string) => {
     const content = (text ?? input).trim();
@@ -172,10 +321,12 @@ export default function HomePage() {
 
     setInput("");
     setSending(true);
-    setMessages((prev) => [...prev, { role: "user", content }]);
+    setStreaming(true);
+    addMessage({ role: "user", content });
 
     try {
-      await ensureProject(content);
+      const pid = await ensureProject(content);
+
       const history = messages
         .filter((message): message is Extract<Msg, { role: "user" | "assistant" }> => message.role === "user" || message.role === "assistant")
         .map((message) => {
@@ -189,53 +340,151 @@ export default function HomePage() {
         });
       history.push({ role: "user", content });
 
-      setMessages((prev) => [...prev, { role: "assistant", content: "", toolCalls: [{ name: "thinking", loading: true }] }]);
+      addMessage({ role: "assistant", content: "", thinking: "正在思考..." });
 
-      const result = await chat({ messages: history });
-      const toolCalls = result.toolResults?.map(toToolCallInfo);
+      thinkingRef.current = "";
+      contentRef.current = "";
 
-      if (toolCalls && toolCalls.length > 0) {
-        setMessages((prev) => {
-          const updated = [...prev];
-          if (updated.length > 0) {
-            updated[updated.length - 1] = { role: "assistant", content: "", toolCalls };
+      let streamUsed = false;
+      let lastRenderTime = 0;
+      const RENDER_INTERVAL = 150;
+
+      const throttledUpdate = (update: Partial<Extract<Msg, { role: "assistant" }>>) => {
+        const now = Date.now();
+        if (now - lastRenderTime >= RENDER_INTERVAL) {
+          lastRenderTime = now;
+          updateLastAssistant(update);
+        }
+      };
+
+      const FILE_PATTERNS = [
+        { regex: /(PPTX created|DOCX created|File written):\s*(\S+\.(?:pptx|docx|py|js|ts|json|txt|md|csv|html|css))/i, group: 2 },
+        { regex: /Content appended to:\s*(\S+)/i, group: 1 },
+      ];
+
+      function extractFileInfo(text: string): Array<{ name: string; path: string }> {
+        const files: Array<{ name: string; path: string }> = [];
+        for (const pat of FILE_PATTERNS) {
+          const match = pat.regex.exec(text);
+          if (match && match[pat.group]) {
+            const filePath = match[pat.group]!;
+            files.push({ name: filePath.split("/").pop() ?? filePath, path: filePath });
           }
-          return updated;
-        });
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        return files;
       }
 
-      const assistantContent = result.response.content || "";
-      setMessages((prev) => {
-        const updated = [...prev];
-        if (updated.length > 0) {
-          const assistantMessage: Extract<Msg, { role: "assistant" }> = {
-            role: "assistant",
-            content: assistantContent || "已收到，我会继续整理任务、证据和下一步确认项。",
-          };
-          if (toolCalls && toolCalls.length > 0) assistantMessage.toolCalls = toolCalls;
-          updated[updated.length - 1] = assistantMessage;
+      try {
+        await chatStream(
+          { messages: history },
+          {
+            onLifecycle: (data) => {
+              if (data.phase === "start") {
+                streamUsed = true;
+              }
+            },
+            onToolStart: (data) => {
+              streamUsed = true;
+              addMessage({ role: "assistant", content: "", toolCalls: [{ name: data.functionName, loading: true }] });
+            },
+            onToolProgress: (_data) => {
+            },
+            onToolEnd: (data) => {
+              streamUsed = true;
+              const files = extractFileInfo(data.result ?? "");
+              const update: Partial<Extract<Msg, { role: "assistant" }>> = {
+                toolCalls: [{ name: data.functionName, result: data.result?.slice(0, 300), loading: false }],
+              };
+              if (files.length > 0) update.files = files;
+              updateLastAssistant(update);
+            },
+            onToolResult: (data) => {
+              streamUsed = true;
+              const files = extractFileInfo(data.result ?? "");
+              const update: Partial<Extract<Msg, { role: "assistant" }>> = {
+                toolCalls: [{ name: data.functionName, result: data.result?.slice(0, 300), loading: false }],
+              };
+              if (files.length > 0) update.files = files;
+              updateLastAssistant(update);
+            },
+            onThinkingStart: () => {
+              streamUsed = true;
+              thinkingRef.current = "";
+              addMessage({ role: "assistant", content: "", thinking: "正在思考..." });
+            },
+            onThinkingDelta: (delta) => {
+              streamUsed = true;
+              thinkingRef.current += delta;
+              throttledUpdate({ thinking: thinkingRef.current });
+            },
+            onThinkingEnd: (finalContent) => {
+              streamUsed = true;
+              thinkingRef.current = finalContent || thinkingRef.current;
+              updateLastAssistant({ thinking: thinkingRef.current });
+            },
+            onContentDelta: (delta) => {
+              streamUsed = true;
+              contentRef.current += delta;
+              throttledUpdate({ content: contentRef.current });
+            },
+            onDone: (data) => {
+              const finalContent = contentRef.current || data.content || "";
+              const finalThinking = thinkingRef.current || data.thinking || "";
+              if (finalContent) {
+                const update: Partial<Extract<Msg, { role: "assistant" }>> = { content: finalContent };
+                if (finalThinking) update.thinking = finalThinking;
+                updateLastAssistant(update);
+              } else if (finalThinking && !contentRef.current) {
+                updateLastAssistant({ thinking: finalThinking });
+              }
+            },
+            onError: (message) => {
+              throw new Error(message);
+            },
+          },
+        );
+      } catch (streamErr) {
+        if (streamUsed) throw streamErr;
+
+        const result = await chat({ messages: history });
+        const toolCalls = result.toolResults?.map(toToolCallInfo);
+
+        if (toolCalls && toolCalls.length > 0) {
+          updateLastAssistant({ toolCalls });
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
-        return updated;
-      });
+
+        const assistantContent = result.response.content || "";
+        const assistantMessage: Extract<Msg, { role: "assistant" }> = {
+          role: "assistant",
+          content: assistantContent,
+        };
+        if (toolCalls && toolCalls.length > 0) assistantMessage.toolCalls = toolCalls;
+        updateLastAssistant(assistantMessage);
+      }
     } catch (error) {
       let message = "请求失败，请稍后重试";
       if (error instanceof ApiClientError) {
         message = error.code === "NOT_IMPLEMENTED"
           ? "AI 模型尚未配置，请先到设置页配置 API Key 和模型接口。"
           : error.message;
+      } else if (error instanceof Error) {
+        message = error.message;
       }
-      setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === "assistant" && !last.content) updated.pop();
-        updated.push({ role: "system", content: message });
-        return updated;
-      });
+      const lastMsg = session.messages[session.messages.length - 1];
+      if (lastMsg?.role === "assistant" && !lastMsg.content) {
+        const msgs = [...session.messages];
+        msgs.pop();
+        msgs.push({ role: "system", content: message });
+        setSession({ ...session, messages: msgs });
+      } else {
+        addMessage({ role: "system", content: message });
+      }
     } finally {
       setSending(false);
+      setStreaming(false);
     }
-  }, [ensureProject, input, messages, sending]);
+  }, [ensureProject, input, messages, sending, session, addMessage, updateLastAssistant, setSession, setStreaming]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -247,44 +496,55 @@ export default function HomePage() {
   const handleConfirmGate = async (gateId: string) => {
     try {
       await confirmHumanGate(gateId, { confirmedBy: "user" });
-      setMessages((prev) => prev.map((message) => (
+      const updated = session.messages.map((message) => (
         message.role === "gate" && message.gateId === gateId ? { ...message, resolved: true } : message
-      )));
-      setMessages((prev) => [...prev, { role: "system", content: "已确认，AI 会继续推进下一步。" }]);
+      ));
+      setSession({ ...session, messages: [...updated, { role: "system" as const, content: "已确认，AI 会继续推进下一步。" }] });
     } catch {
-      setMessages((prev) => [...prev, { role: "system", content: "确认失败，请稍后重试。" }]);
+      addMessage({ role: "system", content: "确认失败，请稍后重试。" });
     }
   };
 
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="conv-page">
-      <header className="conv-header">
-        <div className="conv-header-title">
-          <IconZhiXu size={18} />
-          <span>{projectId ? "任务对话进行中" : "AI 对话首页"}</span>
-        </div>
-        <div className="conv-header-actions">
-          <span className="mode-pill"><IconPrivacy size={13} /> 本地优先</span>
-          {projectId && (
-            <button
-              type="button"
-              className="conv-header-btn"
-              onClick={() => {
-                setMessages([]);
-                setProjectId(null);
-                setInput("");
-              }}
-            >
-              <IconBook size={14} />
-              新对话
-            </button>
-          )}
-        </div>
-      </header>
+    <div className="conv-page-outer">
+      <div className="conv-page">
+        <header className="conv-header">
+          <div className="conv-header-title">
+            <IconZhiXu size={18} />
+            <span>{projectId ? "任务对话进行中" : "AI 对话首页"}</span>
+          </div>
+          <div className="conv-header-actions">
+            {messages.length > 0 && (
+              <button
+                className="btn-secondary"
+                onClick={handleConvertToDoc}
+                disabled={converting}
+                style={{ marginLeft: 8, fontSize: 13 }}
+              >
+                {converting ? "转换中..." : "转为文档"}
+              </button>
+            )}
+            <span className="mode-pill"><IconPrivacy size={13} /> 本地优先</span>
+            {projectId && (
+              <button
+                type="button"
+                className="conv-header-btn"
+                onClick={() => {
+                  clearSession();
+                  setInput("");
+                  setCanvasPanel(null);
+                }}
+              >
+                <IconBook size={14} />
+                新对话
+              </button>
+            )}
+          </div>
+        </header>
 
-      <div className="conv-messages">
+        <div className="conv-messages">
         {isEmpty ? (
           <div className="conv-empty-state">
             <div className="conv-empty-logo anim-fade-in-scale">
@@ -327,10 +587,22 @@ export default function HomePage() {
               }
 
               if (msg.role === "assistant") {
+                const isLastAssistant = index === messages.length - 1 && sending;
                 return (
                   <div key={index} className="conv-message">
                     <div className="conv-avatar conv-avatar-ai">知</div>
                     <div className="conv-message-stack">
+                      {msg.thinking && (
+                        <details className="thinking-panel" open>
+                          <summary className="thinking-summary">
+                            <IconBrain size={14} />
+                            思考过程
+                          </summary>
+                          <div className="thinking-content">
+                            {msg.thinking}
+                          </div>
+                        </details>
+                      )}
                       {msg.toolCalls && msg.toolCalls.length > 0 && (
                         <div className="conv-tool-calls">
                           {msg.toolCalls.map((toolCall, toolIndex) => (
@@ -338,9 +610,31 @@ export default function HomePage() {
                           ))}
                         </div>
                       )}
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="conv-file-cards">
+                          {msg.files.map((file, fileIndex) => (
+                            <a
+                              key={`file-${fileIndex}`}
+                              href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/workspace/files/${encodeURIComponent(file.path)}`}
+                              className="conv-file-card"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download
+                            >
+                              <span className="conv-file-icon">📄</span>
+                              <span className="conv-file-info">
+                                <span className="conv-file-name">{file.name}</span>
+                                <span className="conv-file-action">点击下载</span>
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                       {msg.content && (
                         <div className="conv-bubble conv-bubble-ai">
-                          <MarkdownContent content={msg.content} />
+                          <div className="md-content">
+                            <MarkdownContent content={msg.content} />
+                          </div>
                         </div>
                       )}
                     </div>
@@ -416,6 +710,15 @@ export default function HomePage() {
         </div>
         <div className="conv-input-hint">重要内容会进入可追溯流程，高风险操作会先请求确认。</div>
       </footer>
+      </div>
+
+      {canvasPanel && canvasPanel.type === "ppt" && (
+        <PPTCanvasPanel
+          projectId={canvasPanel.projectId}
+          artifactId={canvasPanel.artifactId}
+          onClose={() => setCanvasPanel(null)}
+        />
+      )}
     </div>
   );
 }

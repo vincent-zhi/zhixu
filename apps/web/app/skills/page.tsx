@@ -6,6 +6,7 @@ import {
   listSkills,
   invokeSkill,
   listAgentJobs,
+  sensenovaListSkills,
   ApiClientError,
 } from "../api-client";
 import type { SkillManifest } from "../api-client";
@@ -50,6 +51,10 @@ export default function SkillsPage() {
   const [invokeResult, setInvokeResult] = useState<Record<string, unknown> | null>(null);
   const [showInvokeConfirm, setShowInvokeConfirm] = useState(false);
 
+  // SenseNova Skills state
+  const [sensenovaSkills, setSenseNovaSkills] = useState<Array<{ name: string; description: string }>>([]);
+  const [sensenovaSkillsLoading, setSenseNovaSkillsLoading] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -60,6 +65,13 @@ export default function SkillsPage() {
       ]);
       setSkills(skillData);
       setAgentJobs(jobData);
+
+      // Load SenseNova skills separately (non-blocking)
+      setSenseNovaSkillsLoading(true);
+      sensenovaListSkills()
+        .then((data) => setSenseNovaSkills(data?.skills ?? []))
+        .catch(() => {})
+        .finally(() => setSenseNovaSkillsLoading(false));
     } catch (e) {
       setError(e instanceof ApiClientError ? e.message : "加载技能数据失败");
     } finally {
@@ -113,100 +125,97 @@ export default function SkillsPage() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <div className="page-loading">加载技能数据中…</div>
+      <main className="skills-shell">
+        <header className="skills-header">
+          <div className="skeleton" style={{ width: 140, height: 12, marginBottom: 8, borderRadius: "var(--radius-pill)" }} />
+          <div className="skeleton skeleton-title" style={{ width: 200 }} />
+        </header>
+        <div className="skills-body">
+          <section className="skills-catalog">
+            <div className="skeleton skeleton-title" />
+            <div className="skills-grid">
+              {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 200 }} />)}
+            </div>
+          </section>
+          <aside className="invocation-logs">
+            <div className="skeleton skeleton-title" />
+            {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 60, marginBottom: 8 }} />)}
+          </aside>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <Link href="/" className="back-link">← 返回首页</Link>
+    <main className="skills-shell">
+      <header className="skills-header">
+        <p className="eyebrow">Skills Capability</p>
+        <h1>技能能力面板</h1>
+      </header>
 
-      <div className="skills-shell">
-        <header className="skills-header">
-          <p className="eyebrow">Skills Capability</p>
-          <h1>技能能力面板</h1>
-        </header>
-
-        {activeSkills.length > 0 && (
-          <section className="skills-active" aria-label="当前活跃技能">
-            <h2>当前活跃技能</h2>
-            <div className="skills-active-list">
-              {activeSkills.map((skill) => (
-                <div key={skill.id} className="skill-active-badge">
-                  <span className="skill-active-dot" />
-                  <strong>{skill.name}</strong>
-                  <span>{skill.provider}</span>
+      {sensenovaSkills.length > 0 && (
+        <section className="skills-active" aria-label="SenseNova 技能" style={{ marginBottom: 16 }}>
+          <h2>SenseNova 技能</h2>
+          {sensenovaSkillsLoading && <div className="empty-state">加载中...</div>}
+          <div className="skills-grid">
+            {sensenovaSkills.map((skill) => (
+              <article key={skill.name} className="skill-card" style={{ borderColor: "var(--color-gold)" }}>
+                <div className="skill-card-header">
+                  <div className="skill-card-identity">
+                    <h4>{skill.name}</h4>
+                    <span className="skill-card-provider">SenseNova</span>
+                  </div>
+                  <span className="risk-badge risk-l1">SN</span>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <div className="skills-body">
-          <section className="skills-catalog" aria-label="技能目录">
-            <h2>技能目录</h2>
-
-            {highRiskSkills.length > 0 && (
-              <div className="skill-risk-group">
-                <h3 className="skill-risk-group-title">高风险技能</h3>
-                <div className="skills-grid">
-                  {highRiskSkills.map((skill) => (
-                    <article key={skill.id} className="skill-card skill-card-highrisk">
-                      <div className="skill-card-header">
-                        <div className="skill-card-identity">
-                          <h4>{skill.name}</h4>
-                          <span className="skill-card-provider">{skill.provider} · v{skill.version}</span>
-                        </div>
-                        <span className={`risk-badge risk-${skill.riskLevel.toLowerCase()}`}>
-                          {skill.riskLevel}
-                        </span>
-                      </div>
-                      <p className="skill-card-desc">{skill.description}</p>
-                      <div className="skill-card-meta">
-                        <span>运行方式：{RUNTIME_LABELS[skill.runtimeType] ?? skill.runtimeType}</span>
-                      </div>
-                      <div className="skill-card-permissions">
-                        <h5>权限要求</h5>
-                        {skill.permissions.map((perm, i) => (
-                          <div key={i} className="skill-permission-item">
-                            <span className={`risk-badge risk-${perm.riskLevel.toLowerCase()}`}>
-                              {perm.riskLevel}
-                            </span>
-                            <span className="skill-perm-scope">{perm.scope}</span>
-                            <span className="skill-perm-desc">{perm.description}</span>
-                            {perm.defaultGranted ? (
-                              <span className="skill-perm-granted">已授权</span>
-                            ) : (
-                              <span className="skill-perm-pending">需授权</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="skill-card-actions">
-                        <button
-                          className="btn-primary btn-sm"
-                          onClick={() => handleInvoke(skill)}
-                          disabled={invoking}
-                        >
-                          {invoking ? "调用中…" : "调用（需确认）"}
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                <p className="skill-card-desc">{skill.description}</p>
+                <div className="skill-card-actions">
+                  <button
+                    className="btn-primary btn-sm"
+                    onClick={() => {
+                      const el = document.getElementById(`sensenova-detail-${skill.name}`);
+                      if (el) el.hidden = !el.hidden;
+                    }}
+                  >
+                    查看详情
+                  </button>
                 </div>
+                <div id={`sensenova-detail-${skill.name}`} hidden style={{ marginTop: 8, fontSize: 13, color: "var(--color-text-secondary)" }}>
+                  <div className="skill-card-meta">
+                    <span>运行方式：外部 API</span>
+                    <span>提供商：SenseNova</span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeSkills.length > 0 && (
+        <section className="skills-active" aria-label="当前活跃技能">
+          <h2>当前活跃技能</h2>
+          <div className="skills-active-list">
+            {activeSkills.map((skill) => (
+              <div key={skill.id} className="skill-active-badge">
+                <span className="skill-active-dot" />
+                <strong>{skill.name}</strong>
+                <span>{skill.provider}</span>
               </div>
-            )}
+            ))}
+          </div>
+        </section>
+      )}
 
+      <div className="skills-body">
+        <section className="skills-catalog" aria-label="技能目录">
+          <h2>技能目录</h2>
+
+          {highRiskSkills.length > 0 && (
             <div className="skill-risk-group">
-              {highRiskSkills.length > 0 && <h3 className="skill-risk-group-title">标准技能</h3>}
-              {otherSkills.length === 0 && skills.length === 0 && (
-                <p className="empty-state">暂无可用技能</p>
-              )}
+              <h3 className="skill-risk-group-title">高风险技能</h3>
               <div className="skills-grid">
-                {otherSkills.map((skill) => (
-                  <article key={skill.id} className="skill-card">
+                {highRiskSkills.map((skill) => (
+                  <article key={skill.id} className="skill-card skill-card-highrisk">
                     <div className="skill-card-header">
                       <div className="skill-card-identity">
                         <h4>{skill.name}</h4>
@@ -243,87 +252,139 @@ export default function SkillsPage() {
                         onClick={() => handleInvoke(skill)}
                         disabled={invoking}
                       >
-                        {invoking ? "调用中…" : "调用"}
+                        {invoking ? "调用中…" : "调用（需确认）"}
                       </button>
                     </div>
                   </article>
                 ))}
               </div>
             </div>
-          </section>
+          )}
 
-          <aside className="invocation-logs" aria-label="调用记录">
-            <h2>调用记录</h2>
-            {agentJobs.length === 0 && (
-              <p className="empty-state">暂无调用记录</p>
+          <div className="skill-risk-group">
+            {highRiskSkills.length > 0 && <h3 className="skill-risk-group-title">标准技能</h3>}
+            {otherSkills.length === 0 && skills.length === 0 && (
+              <p className="empty-state">暂无可用技能</p>
             )}
-            <div className="invocation-log-list">
-              {agentJobs
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                .slice(0, 30)
-                .map((job) => (
-                  <div key={job.id} className="invocation-log-item">
-                    <div className="invocation-log-top">
-                      <strong>{JOB_TYPE_LABELS[job.jobType] ?? job.jobType}</strong>
-                      <span className={`status-badge status-${job.status}`}>
-                        {job.status.replaceAll("_", " ")}
-                      </span>
+            <div className="skills-grid">
+              {otherSkills.map((skill) => (
+                <article key={skill.id} className="skill-card">
+                  <div className="skill-card-header">
+                    <div className="skill-card-identity">
+                      <h4>{skill.name}</h4>
+                      <span className="skill-card-provider">{skill.provider} · v{skill.version}</span>
                     </div>
-                    <div className="invocation-log-meta">
-                      <span>{formatTime(job.createdAt)}</span>
-                      {job.output?.confidence != null && (
-                        <span>置信度：{Math.round(job.output.confidence * 100)}%</span>
-                      )}
-                    </div>
-                    {job.output?.riskFlags && job.output.riskFlags.length > 0 && (
-                      <div className="invocation-log-flags">
-                        {job.output.riskFlags.map((flag, i) => (
-                          <span key={i} className="invocation-flag">{flag}</span>
-                        ))}
-                      </div>
-                    )}
+                    <span className={`risk-badge risk-${skill.riskLevel.toLowerCase()}`}>
+                      {skill.riskLevel}
+                    </span>
                   </div>
-                ))}
-            </div>
-
-            {invokeResult && (
-              <div className="invoke-result">
-                <h3>最近调用结果</h3>
-                <pre>{JSON.stringify(invokeResult, null, 2)}</pre>
-              </div>
-            )}
-          </aside>
-        </div>
-
-        {showInvokeConfirm && selectedSkill && (
-          <div className="modal-overlay" onClick={() => setShowInvokeConfirm(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <h2>确认调用高风险技能</h2>
-              <p>技能 <strong>{selectedSkill.name}</strong> 风险等级为 <span className={`risk-badge risk-${selectedSkill.riskLevel.toLowerCase()}`}>{selectedSkill.riskLevel}</span>，调用前请确认以下权限：</p>
-              <ul className="confirm-perm-list">
-                {selectedSkill.permissions.map((perm, i) => (
-                  <li key={i}>
-                    <span className={`risk-badge risk-${perm.riskLevel.toLowerCase()}`}>{perm.riskLevel}</span>
-                    <strong>{perm.scope}</strong>：{perm.description}
-                  </li>
-                ))}
-              </ul>
-              <div className="modal-actions">
-                <button className="btn-secondary" onClick={() => setShowInvokeConfirm(false)}>取消</button>
-                <button
-                  className="btn-primary"
-                  onClick={() => executeInvoke(selectedSkill.id)}
-                  disabled={invoking}
-                >
-                  {invoking ? "调用中…" : "确认调用"}
-                </button>
-              </div>
+                  <p className="skill-card-desc">{skill.description}</p>
+                  <div className="skill-card-meta">
+                    <span>运行方式：{RUNTIME_LABELS[skill.runtimeType] ?? skill.runtimeType}</span>
+                  </div>
+                  <div className="skill-card-permissions">
+                    <h5>权限要求</h5>
+                    {skill.permissions.map((perm, i) => (
+                      <div key={i} className="skill-permission-item">
+                        <span className={`risk-badge risk-${perm.riskLevel.toLowerCase()}`}>
+                          {perm.riskLevel}
+                        </span>
+                        <span className="skill-perm-scope">{perm.scope}</span>
+                        <span className="skill-perm-desc">{perm.description}</span>
+                        {perm.defaultGranted ? (
+                          <span className="skill-perm-granted">已授权</span>
+                        ) : (
+                          <span className="skill-perm-pending">需授权</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="skill-card-actions">
+                    <button
+                      className="btn-primary btn-sm"
+                      onClick={() => handleInvoke(skill)}
+                      disabled={invoking}
+                    >
+                      {invoking ? "调用中…" : "调用"}
+                    </button>
+                  </div>
+                </article>
+              ))}
             </div>
           </div>
-        )}
+        </section>
 
-        {error && <p className="page-error-inline">{error}</p>}
+        <aside className="invocation-logs" aria-label="调用记录">
+          <h2>调用记录</h2>
+          {agentJobs.length === 0 && (
+            <p className="empty-state">暂无调用记录</p>
+          )}
+          <div className="invocation-log-list">
+            {agentJobs
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .slice(0, 30)
+              .map((job) => (
+                <div key={job.id} className="invocation-log-item">
+                  <div className="invocation-log-top">
+                    <strong>{JOB_TYPE_LABELS[job.jobType] ?? job.jobType}</strong>
+                    <span className={`status-badge status-${job.status}`}>
+                      {job.status.replaceAll("_", " ")}
+                    </span>
+                  </div>
+                  <div className="invocation-log-meta">
+                    <span>{formatTime(job.createdAt)}</span>
+                    {job.output?.confidence != null && (
+                      <span>置信度：{Math.round(job.output.confidence * 100)}%</span>
+                    )}
+                  </div>
+                  {job.output?.riskFlags && job.output.riskFlags.length > 0 && (
+                    <div className="invocation-log-flags">
+                      {job.output.riskFlags.map((flag, i) => (
+                        <span key={i} className="invocation-flag">{flag}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+
+          {invokeResult && (
+            <div className="invoke-result">
+              <h3>最近调用结果</h3>
+              <pre>{JSON.stringify(invokeResult, null, 2)}</pre>
+            </div>
+          )}
+        </aside>
       </div>
+
+      {showInvokeConfirm && selectedSkill && (
+        <div className="modal-overlay" onClick={() => setShowInvokeConfirm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>确认调用高风险技能</h2>
+            <p>技能 <strong>{selectedSkill.name}</strong> 风险等级为 <span className={`risk-badge risk-${selectedSkill.riskLevel.toLowerCase()}`}>{selectedSkill.riskLevel}</span>，调用前请确认以下权限：</p>
+            <ul className="confirm-perm-list">
+              {selectedSkill.permissions.map((perm, i) => (
+                <li key={i}>
+                  <span className={`risk-badge risk-${perm.riskLevel.toLowerCase()}`}>{perm.riskLevel}</span>
+                  <strong>{perm.scope}</strong>：{perm.description}
+                </li>
+              ))}
+            </ul>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setShowInvokeConfirm(false)}>取消</button>
+              <button
+                className="btn-primary"
+                onClick={() => executeInvoke(selectedSkill.id)}
+                disabled={invoking}
+              >
+                {invoking ? "调用中…" : "确认调用"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="page-error-inline">{error}</p>}
     </main>
   );
 }

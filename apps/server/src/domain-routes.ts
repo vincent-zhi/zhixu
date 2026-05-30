@@ -19,6 +19,7 @@ export async function registerDomainRoutes(
   const { registerUndergradRoutes } = await import("./routes/undergrad.js");
   const { registerEfficiencyRoutes } = await import("./routes/efficiency.js");
   const { registerSenseNovaRoutes } = await import("./routes/sensenova.js");
+  const { registerCollabRoutes } = await import("./routes/collab.js");
 
   await registerCoachingRoutes(fastify, store, gateway);
   await registerGradRoutes(fastify, store, gateway);
@@ -26,4 +27,5 @@ export async function registerDomainRoutes(
   await registerUndergradRoutes(fastify, store, gateway);
   await registerEfficiencyRoutes(fastify, store, gateway);
   await registerSenseNovaRoutes(fastify, options?.getImageConfig);
+  await registerCollabRoutes(fastify, store, gateway);
 }

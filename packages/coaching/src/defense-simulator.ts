@@ -1,4 +1,4 @@
-import type { DefenseQuestion, DefenseSimulation, DefensePerformance } from "./types.js";
+import type { DefenseQuestion, DefenseSimulation, DefensePerformance, LLMCallable } from "./types.js";
 
 const CATEGORY_TEMPLATES: Record<DefenseQuestion["category"], Array<{ question: string; expectedPoints: string[] }>> = {
   methodology: [
@@ -133,5 +133,55 @@ export class DefenseSimulator {
       performance,
       overallScore: averageScore,
     };
+  }
+
+  async generateQuestionsFromPaper(
+    paperContent: string,
+    llm: LLMCallable
+  ): Promise<DefenseQuestion[]> {
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术答辩评委。根据论文内容生成 6 个答辩问题，每个问题属于以下类别之一：methodology, results, contribution, literature, future_work, weakness。
+返回 JSON 数组格式：[{"category": "...", "question": "...", "expectedPoints": ["..."], "difficulty": 0.0-1.0}]`,
+        messages: [{ role: "user", content: `请根据以下论文内容生成答辩问题：\n\n${paperContent.slice(0, 4000)}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      const questions: DefenseQuestion[] = (Array.isArray(parsed) ? parsed : parsed.questions ?? []).map((q: any) => ({
+        id: crypto.randomUUID(),
+        category: q.category ?? "methodology",
+        question: q.question ?? "",
+        expectedPoints: q.expectedPoints ?? [],
+        difficulty: q.difficulty ?? 0.5,
+      }));
+      return questions.length > 0 ? questions : this.generateQuestions({ projectTitle: "", projectType: "", content: paperContent });
+    } catch {
+      return this.generateQuestions({ projectTitle: "", projectType: "", content: paperContent });
+    }
+  }
+
+  async evaluateAnswerWithRubric(
+    question: DefenseQuestion,
+    answer: string,
+    llm: LLMCallable
+  ): Promise<{ score: number; strengths: string[]; weaknesses: string[]; suggestions: string[] }> {
+    try {
+      const result = await llm.chat({
+        system: `你是一位学术答辩评委。评估学生对答辩问题的回答质量。
+返回 JSON：{"score": 0.0-1.0, "strengths": ["..."], "weaknesses": ["..."], "suggestions": ["..."]}`,
+        messages: [{ role: "user", content: `问题：${question.question}\n期望要点：${question.expectedPoints.join("、")}\n\n学生回答：\n${answer}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return {
+        score: parsed.score ?? 0.5,
+        strengths: parsed.strengths ?? [],
+        weaknesses: parsed.weaknesses ?? [],
+        suggestions: parsed.suggestions ?? [],
+      };
+    } catch {
+      const basic = this.evaluateAnswer(question, answer);
+      return { score: basic.score, strengths: basic.coveredPoints, weaknesses: basic.missedPoints, suggestions: [] };
+    }
   }
 }

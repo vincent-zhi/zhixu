@@ -1,4 +1,4 @@
-import type { SocraticQuestion } from "./types.js";
+import type { SocraticQuestion, LLMCallable } from "./types.js";
 
 const CATEGORY_QUESTIONS: Record<SocraticQuestion["category"], Array<{ template: string; followUps: string[] }>> = {
   assumption: [
@@ -88,5 +88,31 @@ export class SocraticCoach {
     }
 
     return questions;
+  }
+
+  async generateContextualQuestions(
+    topic: string,
+    conversationHistory: string[],
+    projectContext: { title: string; type: string },
+    llm: LLMCallable
+  ): Promise<SocraticQuestion[]> {
+    try {
+      const result = await llm.chat({
+        system: `你是一位苏格拉底式教学导师。根据话题和对话历史，生成 4 个递进式追问。
+返回 JSON 数组：[{"category": "...", "question": "...", "followUp": "..."}]`,
+        messages: [{ role: "user", content: `话题：${topic}\n项目：${projectContext.title}（${projectContext.type}）\n历史对话：\n${conversationHistory.slice(-5).join("\n")}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return (Array.isArray(parsed) ? parsed : parsed.questions ?? []).map((q: any) => ({
+        id: crypto.randomUUID(),
+        category: q.category ?? "assumption",
+        question: q.question ?? "",
+        followUpQuestions: q.followUp ? [q.followUp] : [],
+        relatedConcept: topic,
+      }));
+    } catch {
+      return this.generateQuestions(topic, 2);
+    }
   }
 }

@@ -4,7 +4,7 @@ import { ProcrastinationAdapterEngine } from "./procrastination-adapter.js";
 import { SocraticCoach } from "./socratic-coach.js";
 import { MeetingBriefer } from "./meeting-briefer.js";
 import { DiagnosticEngine } from "./diagnostic-engine.js";
-import type { DefenseQuestion, SocraticQuestion } from "./types.js";
+import type { DefenseQuestion, SocraticQuestion, LLMCallable } from "./types.js";
 
 describe("DefenseSimulator", () => {
   const simulator = new DefenseSimulator();
@@ -291,5 +291,167 @@ describe("DiagnosticEngine", () => {
 
     expect(report.knowledgeRetention).toBeGreaterThanOrEqual(0);
     expect(report.knowledgeRetention).toBeLessThanOrEqual(1);
+  });
+});
+
+// --- LLM-Enhanced Method Tests ---
+
+describe("DefenseSimulator LLM enhanced", () => {
+  it("generateQuestionsFromPaper returns LLM-generated questions", async () => {
+    const sim = new DefenseSimulator();
+    const mockLLM: LLMCallable = {
+      async chat() {
+        return {
+          content: JSON.stringify({
+            questions: [
+              { category: "methodology", question: "Why this method?", expectedPoints: ["justification"], difficulty: 0.5 },
+              { category: "results", question: "What are findings?", expectedPoints: ["main results"], difficulty: 0.6 },
+            ],
+          }),
+        };
+      },
+    };
+    const result = await sim.generateQuestionsFromPaper("test paper content", mockLLM);
+    expect(result.length).toBe(2);
+    expect(result[0]!.category).toBe("methodology");
+    expect(result[1]!.category).toBe("results");
+  });
+
+  it("generateQuestionsFromPaper falls back on LLM error", async () => {
+    const sim = new DefenseSimulator();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await sim.generateQuestionsFromPaper("test paper content", badLLM);
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("evaluateAnswerWithRubric returns LLM feedback", async () => {
+    const sim = new DefenseSimulator();
+    const mockLLM: LLMCallable = {
+      async chat() {
+        return {
+          content: JSON.stringify({
+            score: 0.8,
+            strengths: ["Clear explanation"],
+            weaknesses: ["Missing details"],
+            suggestions: ["Add more detail"],
+          }),
+        };
+      },
+    };
+    const question = sim.generateQuestions({ projectTitle: "Test", projectType: "research", content: "" })[0]!;
+    const result = await sim.evaluateAnswerWithRubric(question, "test answer", mockLLM);
+    expect(result.score).toBe(0.8);
+    expect(result.strengths).toEqual(["Clear explanation"]);
+    expect(result.suggestions).toEqual(["Add more detail"]);
+  });
+
+  it("evaluateAnswerWithRubric falls back on LLM error", async () => {
+    const sim = new DefenseSimulator();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const question: DefenseQuestion = {
+      id: "q1", category: "methodology", question: "Why?",
+      expectedPoints: ["comparison with alternatives"], difficulty: 0.5,
+    };
+    const result = await sim.evaluateAnswerWithRubric(question, "I compared alternatives.", badLLM);
+    expect(result.score).toBeGreaterThanOrEqual(0);
+    expect(Array.isArray(result.strengths)).toBe(true);
+  });
+});
+
+describe("SocraticCoach LLM enhanced", () => {
+  it("generateContextualQuestions returns questions", async () => {
+    const coach = new SocraticCoach();
+    const mockLLM: LLMCallable = {
+      async chat() {
+        return {
+          content: JSON.stringify([
+            { category: "assumption", question: "What assumptions?", followUp: "Are they justified?" },
+          ]),
+        };
+      },
+    };
+    const result = await coach.generateContextualQuestions("machine learning", [], { title: "ML Project", type: "research" }, mockLLM);
+    expect(result.length).toBe(1);
+    expect(result[0]!.category).toBe("assumption");
+    expect(result[0]!.relatedConcept).toBe("machine learning");
+    expect(result[0]!.followUpQuestions).toEqual(["Are they justified?"]);
+  });
+
+  it("generateContextualQuestions falls back on LLM error", async () => {
+    const coach = new SocraticCoach();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await coach.generateContextualQuestions("topic", [], { title: "P", type: "t" }, badLLM);
+    expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+describe("MeetingBriefer LLM enhanced", () => {
+  it("generateProjectBrief returns LLM brief", async () => {
+    const briefer = new MeetingBriefer();
+    const mockLLM: LLMCallable = {
+      async chat() {
+        return {
+          content: JSON.stringify({
+            keyPoints: ["Point 1"],
+            slideSuggestions: ["Slide 1"],
+            anticipatedQuestions: ["Q1"],
+            checklist: ["Check 1"],
+          }),
+        };
+      },
+    };
+    const result = await briefer.generateProjectBrief({
+      projectTitle: "Test Project", projectType: "research",
+      recentProgress: ["Completed draft"], upcomingDeadlines: ["Friday"],
+      sourceCount: 5, taskCount: 3, llm: mockLLM,
+    });
+    expect(result.keyPoints).toEqual(["Point 1"]);
+    expect(result.suggestedSlides).toEqual(["Slide 1"]);
+    expect(result.meetingType).toBe("group_meeting");
+  });
+
+  it("generateProjectBrief falls back on LLM error", async () => {
+    const briefer = new MeetingBriefer();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await briefer.generateProjectBrief({
+      projectTitle: "Test", projectType: "thesis",
+      recentProgress: ["Draft done"], upcomingDeadlines: ["June 1"],
+      sourceCount: 2, taskCount: 1, llm: badLLM,
+    });
+    expect(result.keyPoints.length).toBeGreaterThan(0);
+    expect(result.meetingType).toBe("group_meeting");
+  });
+});
+
+describe("DiagnosticEngine LLM enhanced", () => {
+  it("generateInsightReport returns LLM insights", async () => {
+    const engine = new DiagnosticEngine();
+    const mockLLM: LLMCallable = {
+      async chat() {
+        return {
+          content: JSON.stringify({
+            insights: ["Focus on task completion", "Break large tasks into smaller ones"],
+          }),
+        };
+      },
+    };
+    const result = await engine.generateInsightReport({
+      tasks: [{ title: "Write paper", status: "completed", completedAt: "2026-05-28" }],
+      sourceCount: 3, evidenceCoverage: 0.7, llm: mockLLM,
+    });
+    expect(result.aiInsights).toEqual(["Focus on task completion", "Break large tasks into smaller ones"]);
+    expect(result.completionRate).toBe(1);
+    expect(result.retentionScore).toBeGreaterThanOrEqual(0);
+  });
+
+  it("generateInsightReport falls back on LLM error", async () => {
+    const engine = new DiagnosticEngine();
+    const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
+    const result = await engine.generateInsightReport({
+      tasks: [{ title: "Write paper", status: "completed" }],
+      sourceCount: 1, evidenceCoverage: 0.5, llm: badLLM,
+    });
+    expect(result.aiInsights).toEqual([]);
+    expect(result.completionRate).toBe(1);
   });
 });

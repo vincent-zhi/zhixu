@@ -1,4 +1,4 @@
-import type { DiagnosticReport } from "./types.js";
+import type { DiagnosticReport, LLMCallable } from "./types.js";
 
 export class DiagnosticEngine {
   generateReport(input: {
@@ -79,5 +79,62 @@ export class DiagnosticEngine {
       recommendations,
       knowledgeRetention,
     };
+  }
+
+  async generateInsightReport(input: {
+    tasks: Array<{ title: string; status: string; dueAt?: string; completedAt?: string }>;
+    sourceCount: number;
+    evidenceCoverage: number;
+    llm: LLMCallable;
+  }): Promise<{ completionRate: number; averageDelayDays: number; riskAreas: string[]; strengths: string[]; aiInsights: string[]; retentionScore: number }> {
+    const basicTasks = input.tasks.map(t => ({
+      id: crypto.randomUUID(),
+      projectId: "",
+      title: t.title,
+      status: t.status,
+      assigneeType: "user" as const,
+      responsibilityLabel: "user_responsible" as const,
+      priority: 1,
+      riskLevel: "L0" as const,
+      ...(t.dueAt ? { dueAt: t.dueAt } : {}),
+      ...(t.completedAt ? { completedAt: t.completedAt } : {}),
+    }));
+    const basicReport = this.generateReport({
+      projectId: "",
+      period: { start: "", end: "" },
+      tasks: basicTasks.map(t => ({
+        status: t.status,
+        dueAt: t.dueAt ?? null,
+        completedAt: t.completedAt ?? null,
+      })),
+      artifacts: [{ evidenceCoverage: input.evidenceCoverage }],
+    });
+
+    try {
+      const result = await input.llm.chat({
+        system: `你是一位学业导师。根据学生的任务完成数据，给出 3-5 条具体可行的改进建议。
+返回 JSON：{"insights": ["..."]}`,
+        messages: [{ role: "user", content: `完成率：${(basicReport.taskCompletionRate * 100).toFixed(0)}%\n平均延迟：${basicReport.averageDelay.toFixed(1)} 天\n风险领域：${basicReport.riskAreas.join("、")}\n优势领域：${basicReport.strengthAreas.join("、")}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return {
+        completionRate: basicReport.taskCompletionRate,
+        averageDelayDays: basicReport.averageDelay,
+        riskAreas: basicReport.riskAreas,
+        strengths: basicReport.strengthAreas,
+        aiInsights: parsed.insights ?? [],
+        retentionScore: basicReport.knowledgeRetention,
+      };
+    } catch {
+      return {
+        completionRate: basicReport.taskCompletionRate,
+        averageDelayDays: basicReport.averageDelay,
+        riskAreas: basicReport.riskAreas,
+        strengths: basicReport.strengthAreas,
+        aiInsights: [],
+        retentionScore: basicReport.knowledgeRetention,
+      };
+    }
   }
 }

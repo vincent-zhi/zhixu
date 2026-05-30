@@ -1,4 +1,4 @@
-import type { MeetingBrief } from "./types.js";
+import type { MeetingBrief, LLMCallable } from "./types.js";
 
 const MEETING_TEMPLATES: Record<MeetingBrief["meetingType"], {
   keyPointTemplates: string[];
@@ -142,5 +142,41 @@ export class MeetingBriefer {
       anticipatedQuestions,
       preparationChecklist,
     };
+  }
+
+  async generateProjectBrief(input: {
+    projectTitle: string;
+    projectType: string;
+    recentProgress: string[];
+    upcomingDeadlines: string[];
+    sourceCount: number;
+    taskCount: number;
+    llm: LLMCallable;
+  }): Promise<MeetingBrief> {
+    try {
+      const result = await input.llm.chat({
+        system: `你是一位学术会议准备助手。根据项目信息生成组会简报。
+返回 JSON：{"keyPoints": ["..."], "slideSuggestions": ["..."], "anticipatedQuestions": ["..."], "checklist": ["..."]}`,
+        messages: [{ role: "user", content: `项目：${input.projectTitle}（${input.projectType}）\n近期进展：${input.recentProgress.join("、")}\n截止日期：${input.upcomingDeadlines.join("、")}\n资料数：${input.sourceCount}，任务数：${input.taskCount}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return {
+        id: crypto.randomUUID(),
+        projectId: "",
+        meetingType: "group_meeting",
+        keyPoints: parsed.keyPoints ?? [],
+        suggestedSlides: parsed.slideSuggestions ?? [],
+        anticipatedQuestions: parsed.anticipatedQuestions ?? [],
+        preparationChecklist: parsed.checklist ?? [],
+      };
+    } catch {
+      return this.generateBrief({
+        projectId: "",
+        meetingType: "group_meeting",
+        recentProgress: input.recentProgress,
+        upcomingDeadlines: input.upcomingDeadlines,
+      });
+    }
   }
 }

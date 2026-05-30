@@ -18,6 +18,8 @@ export class LLMClient {
     tools?: ToolDefinition[];
     toolChoice?: "auto" | "none" | "required" | { type: "function"; function: { name: string } };
     stream?: boolean;
+    enableThinking?: boolean;
+    thinkingBudget?: number;
   }): Promise<LLMResponse> {
     const openaiMessages = input.messages.map((msg) => {
       if (msg.role === "assistant" && msg.toolCalls) {
@@ -60,6 +62,14 @@ export class LLMClient {
 
     if (this.config.enableThinking) {
       params.enable_thinking = true;
+    }
+
+    if (input.enableThinking !== undefined) {
+      params.enable_thinking = input.enableThinking;
+    }
+    if (input.thinkingBudget !== undefined && input.thinkingBudget > 0) {
+      params.enable_thinking = true;
+      params.thinking_budget = input.thinkingBudget;
     }
 
     const response = await this.client.chat.completions.create(

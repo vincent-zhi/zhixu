@@ -18,6 +18,7 @@ export interface ModelGateway {
   chatWithTools(input: {
     messages: ChatMessage[];
     systemPrompt?: string;
+    thinkingBudget?: number;
   }): Promise<{ response: LLMResponse; toolResults: ToolCallResult[] }>;
 }
 
@@ -141,6 +142,7 @@ export class LLMModelGateway implements ModelGateway {
   async chatWithTools(input: {
     messages: ChatMessage[];
     systemPrompt?: string;
+    thinkingBudget?: number;
   }): Promise<{ response: LLMResponse; toolResults: ToolCallResult[] }> {
     const messages: ChatMessage[] = [];
 
@@ -153,7 +155,8 @@ export class LLMModelGateway implements ModelGateway {
     const allToolResults: ToolCallResult[] = [];
     let round = 0;
 
-    let response = await this.client.chat(buildChatInput(messages, this.toolRegistry));
+    const thinkingOptions = input.thinkingBudget !== undefined ? { thinkingBudget: input.thinkingBudget } : {};
+    let response = await this.client.chat({ ...buildChatInput(messages, this.toolRegistry), ...thinkingOptions });
 
     while (response.toolCalls && response.toolCalls.length > 0 && round < this.maxToolRounds) {
       round++;
@@ -189,7 +192,7 @@ export class LLMModelGateway implements ModelGateway {
         });
       }
 
-      response = await this.client.chat(buildChatInput(messages, this.toolRegistry));
+      response = await this.client.chat({ ...buildChatInput(messages, this.toolRegistry), ...thinkingOptions });
     }
 
     return { response, toolResults: allToolResults };

@@ -2,7 +2,10 @@ import type { AgentOutput, SourceSummary } from "@zhixu/core";
 import {
   MarkItDownProvider,
   normalizeToAgentOutput,
-  type DocumentParserProvider
+  type DocumentParserProvider,
+  type ParseResult,
+  type DocumentNode,
+  type EvidenceAnchor
 } from "@zhixu/document-intelligence";
 
 export class MockDocumentPipeline {

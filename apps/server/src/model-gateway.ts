@@ -10,6 +10,7 @@ export interface ModelGateway {
   chatWithTools?(input: {
     messages: Array<{ role: "system" | "user" | "assistant" | "tool"; content: string | null; toolCalls?: unknown[]; toolCallId?: string }>;
     systemPrompt?: string;
+    thinkingBudget?: number;
   }): Promise<{ response: unknown; toolResults: unknown[] }>;
 }
 

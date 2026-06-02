@@ -37,3 +37,4 @@ export const VersionDiffResultSchema = z.object({
 export type VersionSnapshot = z.infer<typeof VersionSnapshotSchema>;
 export type BlockDiff = z.infer<typeof BlockDiffSchema>;
 export type VersionDiffResult = z.infer<typeof VersionDiffResultSchema>;
+export type ArtifactVersion = VersionSnapshot;

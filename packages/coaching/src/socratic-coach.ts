@@ -115,4 +115,32 @@ export class SocraticCoach {
       return this.generateQuestions(topic, 2);
     }
   }
+
+  async generateContextualQuestionsEnhanced(
+    conversationHistory: string[],
+    projectContext: { title: string; type: string; sources: string[] },
+    llm: LLMCallable
+  ): Promise<SocraticQuestion[]> {
+    try {
+      const result = await llm.chat({
+        system: `你是一位苏格拉底式教学导师。根据对话历史和项目上下文，生成 4 个递进式追问。
+返回 JSON：{"questions": [{"category": "assumption"|"evidence"|"alternative"|"implication"|"definition", "question": "...", "followUpQuestions": ["..."], "relatedConcept": "..."}]}`,
+        messages: [{ role: "user", content: `项目：${projectContext.title}（${projectContext.type}）\n参考资料：${projectContext.sources.join("、")}\n对话历史：\n${conversationHistory.slice(-5).join("\n")}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      const questions: SocraticQuestion[] = (Array.isArray(parsed) ? parsed : parsed.questions ?? []).map((q: any) => ({
+        id: crypto.randomUUID(),
+        category: q.category ?? "assumption",
+        question: q.question ?? "",
+        followUpQuestions: q.followUpQuestions ?? [],
+        relatedConcept: q.relatedConcept ?? projectContext.title,
+        verificationStatus: "yellow" as const,
+      }));
+      if (questions.length > 0) return questions;
+      return this.generateQuestions(projectContext.title, 2).map((q) => ({ ...q, verificationStatus: "green" as const }));
+    } catch {
+      return this.generateQuestions(projectContext.title, 2).map((q) => ({ ...q, verificationStatus: "green" as const }));
+    }
+  }
 }

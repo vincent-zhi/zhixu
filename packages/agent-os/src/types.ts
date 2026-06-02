@@ -1,3 +1,37 @@
+export type {
+  ThinkingEntry,
+  ProgressDetail,
+  AgentProcessUpdate,
+  AgentProcessCard,
+  CollaborationSnapshot
+} from "@zhixu/core";
+
+export type {
+  PresentationBrief,
+  DecisionCardSet,
+  DecisionCardOption,
+  RiskLevel,
+  ResponsibilityColor
+} from "@zhixu/core";
+
+export type {
+  PaperCard,
+  PaperComparisonMatrix,
+  PresentationPath,
+  AdvisorQuestion
+} from "@zhixu/core";
+
+export type {
+  SlidePlan,
+  SpeakerNotes,
+  TopicCandidateExtended
+} from "@zhixu/core";
+
+export type {
+  CanvasPatch,
+  AgentPhase
+} from "@zhixu/core";
+
 export interface UnderstandingResult {
   goals: string[];
   deliverables: string[];

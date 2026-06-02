@@ -9,6 +9,18 @@ export interface SenseNovaSkillMeta {
   body: string; // full markdown body after frontmatter
 }
 
+export function resolveSenseNovaSkillsRoot(skillsRoot?: string): string {
+  if (skillsRoot) return skillsRoot;
+
+  const candidates = [
+    join(process.cwd(), "skills", "sensenova"),
+    join(process.cwd(), "..", "skills", "sensenova"),
+    join(process.cwd(), "..", "..", "skills", "sensenova"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
 /**
  * Parse YAML frontmatter from a SKILL.md file.
  * Simple parser — does not use a YAML library for speed.
@@ -47,7 +59,7 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
  * Returns metadata + full SKILL.md body for each skill.
  */
 export function loadSenseNovaSkills(skillsRoot?: string): SenseNovaSkillMeta[] {
-  const root = skillsRoot ?? join(process.cwd(), "skills", "sensenova");
+  const root = resolveSenseNovaSkillsRoot(skillsRoot);
   if (!existsSync(root)) return [];
 
   const skills: SenseNovaSkillMeta[] = [];

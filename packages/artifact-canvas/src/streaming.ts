@@ -8,7 +8,7 @@ function updateBlock(doc: CanvasDocument, blockId: string, updater: (block: Canv
       return updater(block);
     }
     if (block.children.length > 0) {
-      const updatedChildren = block.children.map(child =>
+      const updatedChildren = block.children.map((child: CanvasBlock) =>
         child.id === blockId ? updater(child) : child
       );
       if (updatedChildren !== block.children) {

@@ -8,8 +8,8 @@ import type { SharedKnowledgebase } from "./types.js";
 describe("ProjectSharingManager", () => {
   const manager = new ProjectSharingManager();
 
-  it("creates a project share", () => {
-    const share = manager.createShare({
+  it("creates a project share", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "read_only",
@@ -23,8 +23,8 @@ describe("ProjectSharingManager", () => {
     expect(share.expiresAt).toBeNull();
   });
 
-  it("creates a share with expiration", () => {
-    const share = manager.createShare({
+  it("creates a share with expiration", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "edit",
@@ -34,8 +34,8 @@ describe("ProjectSharingManager", () => {
     expect(share.expiresAt).toBe("2099-12-31");
   });
 
-  it("checks access for valid recipient", () => {
-    const share = manager.createShare({
+  it("checks access for valid recipient", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "comment",
@@ -44,8 +44,8 @@ describe("ProjectSharingManager", () => {
     expect(manager.checkAccess(share.id, "user-2")).toBe(true);
   });
 
-  it("denies access for non-recipient", () => {
-    const share = manager.createShare({
+  it("denies access for non-recipient", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "read_only",
@@ -54,8 +54,8 @@ describe("ProjectSharingManager", () => {
     expect(manager.checkAccess(share.id, "user-3")).toBe(false);
   });
 
-  it("denies access for expired share", () => {
-    const share = manager.createShare({
+  it("denies access for expired share", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "read_only",
@@ -65,23 +65,23 @@ describe("ProjectSharingManager", () => {
     expect(manager.checkAccess(share.id, "user-2")).toBe(false);
   });
 
-  it("revokes a share", () => {
-    const share = manager.createShare({
+  it("revokes a share", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "read_only",
       recipientIds: ["user-2"],
     });
-    expect(manager.revokeShare(share.id)).toBe(true);
+    expect(await manager.revokeShare(share.id)).toBe(true);
     expect(manager.checkAccess(share.id, "user-2")).toBe(false);
   });
 
-  it("returns false for revoking non-existent share", () => {
-    expect(manager.revokeShare("nonexistent")).toBe(false);
+  it("returns false for revoking non-existent share", async () => {
+    expect(await manager.revokeShare("nonexistent")).toBe(false);
   });
 
-  it("getShare retrieves a share by id", () => {
-    const share = manager.createShare({
+  it("getShare retrieves a share by id", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "user-1",
       shareType: "read_only",
@@ -96,26 +96,26 @@ describe("ProjectSharingManager", () => {
     expect(manager.getShare("nonexistent")).toBeUndefined();
   });
 
-  it("listSharesByProject returns shares for a given project", () => {
-    const s1 = manager.createShare({
+  it("listSharesByProject returns shares for a given project", async () => {
+    const s1 = await manager.createShare({
       projectId: "p-list",
       sharedBy: "user-1",
       shareType: "read_only",
       recipientIds: ["user-2"],
     });
-    manager.createShare({
+    await manager.createShare({
       projectId: "other-project",
       sharedBy: "user-1",
       shareType: "edit",
       recipientIds: ["user-3"],
     });
-    const results = manager.listSharesByProject("p-list");
+    const results = await manager.listSharesByProject("p-list");
     expect(results.some((s) => s.id === s1.id)).toBe(true);
     expect(results.every((s) => s.projectId === "p-list")).toBe(true);
   });
 
-  it("listSharesByUser returns shares where user is recipient or sharer", () => {
-    const s1 = manager.createShare({
+  it("listSharesByUser returns shares where user is recipient or sharer", async () => {
+    const s1 = await manager.createShare({
       projectId: "p-user",
       sharedBy: "user-1",
       shareType: "read_only",
@@ -125,8 +125,8 @@ describe("ProjectSharingManager", () => {
     expect(results.some((s) => s.id === s1.id)).toBe(true);
   });
 
-  it("listSharesByUser includes shares created by the user", () => {
-    const s1 = manager.createShare({
+  it("listSharesByUser includes shares created by the user", async () => {
+    const s1 = await manager.createShare({
       projectId: "p-owner",
       sharedBy: "owner-1",
       shareType: "edit",
@@ -136,8 +136,8 @@ describe("ProjectSharingManager", () => {
     expect(results.some((s) => s.id === s1.id)).toBe(true);
   });
 
-  it("checkAccess grants access to the share creator", () => {
-    const share = manager.createShare({
+  it("checkAccess grants access to the share creator", async () => {
+    const share = await manager.createShare({
       projectId: "p1",
       sharedBy: "creator-1",
       shareType: "read_only",
@@ -146,8 +146,8 @@ describe("ProjectSharingManager", () => {
     expect(manager.checkAccess(share.id, "creator-1")).toBe(true);
   });
 
-  it("checkProjectAccess returns the share when user has valid access", () => {
-    const share = manager.createShare({
+  it("checkProjectAccess returns the share when user has valid access", async () => {
+    const share = await manager.createShare({
       projectId: "p-check",
       sharedBy: "user-1",
       shareType: "comment",
@@ -158,8 +158,8 @@ describe("ProjectSharingManager", () => {
     expect(result!.id).toBe(share.id);
   });
 
-  it("checkProjectAccess returns undefined for expired shares", () => {
-    manager.createShare({
+  it("checkProjectAccess returns undefined for expired shares", async () => {
+    await manager.createShare({
       projectId: "p-expired",
       sharedBy: "user-1",
       shareType: "read_only",
@@ -169,8 +169,8 @@ describe("ProjectSharingManager", () => {
     expect(manager.checkProjectAccess("p-expired", "user-2")).toBeUndefined();
   });
 
-  it("checkProjectAccess returns undefined when user has no access", () => {
-    manager.createShare({
+  it("checkProjectAccess returns undefined when user has no access", async () => {
+    await manager.createShare({
       projectId: "p-no-access",
       sharedBy: "user-1",
       shareType: "read_only",

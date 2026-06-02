@@ -2,24 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ProjectStore } from "../project-store.js";
 import type { ModelGateway } from "../model-gateway.js";
 import { DefenseSimulator, SocraticCoach, MeetingBriefer, DiagnosticEngine, ProcrastinationAdapterEngine } from "@zhixu/coaching";
-import type { LLMCallable } from "@zhixu/coaching";
-
-function asLLMCallable(gateway: ModelGateway): LLMCallable | null {
-  if (!gateway.chatWithTools) return null;
-  return {
-    async chat(params) {
-      const result = await gateway.chatWithTools!({
-        messages: [
-          { role: "system", content: params.system },
-          ...params.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-        ],
-        systemPrompt: params.system,
-      });
-      const response = result.response as any;
-      return { content: response?.content ?? response?.choices?.[0]?.message?.content ?? "{}" };
-    },
-  };
-}
+import { asLLMCallable } from "../llm-adapter.js";
 
 export async function registerCoachingRoutes(fastify: FastifyInstance, store: ProjectStore, gateway: ModelGateway): Promise<void> {
   const defenseSim = new DefenseSimulator();
@@ -75,7 +58,7 @@ export async function registerCoachingRoutes(fastify: FastifyInstance, store: Pr
     if (!project) return reply.status(404).send({ error: "project_not_found" });
 
     if (body.conversationHistory && body.conversationHistory.length > 0 && llm) {
-      return socraticCoach.generateContextualQuestions(body.topic, body.conversationHistory, { title: project.title, type: project.type }, llm);
+      return socraticCoach.generateContextualQuestionsEnhanced(body.conversationHistory, { title: project.title, type: project.type, sources: [] }, llm);
     }
     return socraticCoach.generateQuestions(body.topic, body.depth ?? 2);
   });
@@ -118,14 +101,12 @@ export async function registerCoachingRoutes(fastify: FastifyInstance, store: Pr
     }));
 
     if (llm) {
-      return diagnosticEngine.generateInsightReport({
-        tasks: project.tasks.map((t: any) => ({
-          title: t.title, status: t.status,
-          ...(t.dueAt ? { dueAt: String(t.dueAt) } : {}),
-          ...(t.completedAt ? { completedAt: String(t.completedAt) } : {}),
-        })),
-        sourceCount: project.sources.length, evidenceCoverage: 0.5, llm,
-      });
+      return diagnosticEngine.generateInsightReportEnhanced({
+        title: project.title,
+        type: project.type,
+        tasks: project.tasks.map((t: any) => ({ status: t.status, title: t.title })),
+        artifacts: [],
+      }, llm);
     }
     return diagnosticEngine.generateReport({
       projectId,

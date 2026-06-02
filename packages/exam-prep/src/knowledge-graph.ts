@@ -8,8 +8,8 @@ function extractHeadings(content: string): Array<{ level: number; text: string }
     const match = line.match(/^(#{1,6})\s+(.+)/);
     if (match) {
       headings.push({
-        level: match[1].length,
-        text: match[2].trim()
+        level: match[1]!.length,
+        text: match[2]!.trim()
       });
     }
   }
@@ -68,8 +68,8 @@ export class KnowledgeGraphBuilder {
 
     for (let i = 1; i < chapterIds.length; i++) {
       edges.push({
-        from: chapterIds[i - 1],
-        to: chapterIds[i],
+        from: chapterIds[i - 1]!,
+        to: chapterIds[i]!,
         type: "prerequisite"
       });
     }

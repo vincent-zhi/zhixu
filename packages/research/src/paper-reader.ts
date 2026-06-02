@@ -229,13 +229,45 @@ export class PaperReader {
     const basic = this.readPaper({ id: crypto.randomUUID(), fileName: "", content });
     try {
       const result = await llm.chat({
-        system: `你是一位学术论文精读助手。从论文内容中提取结构化信息。
-返回 JSON：{"title": "...", "authors": ["..."], "year": 2024, "venue": "...", "problem": "...", "method": "...", "dataset": "...", "metrics": ["..."], "mainResults": "...", "limitations": ["..."], "futureWork": ["..."], "contributions": ["..."], "reproducibility": "..."}`,
+        system: `你是一位学术论文精读助手。从论文内容中深度提取结构化信息，每个字段需附带 evidence_anchor（页码或段落引用）。
+返回 JSON：
+{
+  "title": "...",
+  "authors": ["..."],
+  "year": 2024,
+  "venue": "...",
+  "research_question": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "background_motivation": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "methodology": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "dataset": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "experimental_setup": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "results": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "contributions": { "value": ["..."], "evidence_anchor": "第X页/第Y段" },
+  "limitations": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "reproducibility": { "value": "...", "evidence_anchor": "第X页/第Y段" },
+  "metrics": ["..."]
+}`,
         messages: [{ role: "user", content: content.slice(0, 6000) }],
         responseFormat: { type: "json_object" },
       });
       const parsed = JSON.parse(result.content);
-      return { ...basic, ...parsed, authors: parsed.authors ?? basic.authors, year: parsed.year ?? basic.year };
+      const extractValue = (field: any) =>
+        typeof field === "object" && field !== null && "value" in field ? field.value : field;
+      return {
+        ...basic,
+        title: typeof parsed.title === "string" ? parsed.title : basic.title,
+        authors: Array.isArray(parsed.authors) ? parsed.authors : basic.authors,
+        year: typeof parsed.year === "number" ? parsed.year : basic.year,
+        venue: typeof parsed.venue === "string" ? parsed.venue : basic.venue,
+        problem: String(extractValue(parsed.research_question) ?? extractValue(parsed.background_motivation) ?? extractValue(parsed.problem) ?? basic.problem),
+        method: String(extractValue(parsed.methodology) ?? extractValue(parsed.method) ?? basic.method),
+        dataset: String(extractValue(parsed.dataset) ?? basic.dataset),
+        metrics: Array.isArray(parsed.metrics) ? parsed.metrics : basic.metrics,
+        mainResults: String(extractValue(parsed.results) ?? extractValue(parsed.mainResults) ?? basic.mainResults),
+        limitations: Array.isArray(extractValue(parsed.limitations)) ? (extractValue(parsed.limitations) as string[]).join("; ") : String(extractValue(parsed.limitations) ?? basic.limitations),
+        futureWork: basic.futureWork,
+        doi: basic.doi,
+      };
     } catch {
       return basic;
     }
@@ -248,13 +280,21 @@ export class PaperReader {
     Omit<PaperMatrix, "controversies"> & {
       methodClassification: Array<{ category: string; papers: string[] }>;
       controversies: Array<{ topic: string; positions: string[] }>;
+      researchGaps: string[];
+      suggestedOutline: string[];
     }
   > {
     const basic = this.comparePapers(entries);
     try {
       const result = await llm.chat({
         system: `你是一位文献综述助手。对比分析多篇论文，识别方法分类、争议点和研究空白。
-返回 JSON：{"methodClassification": [{"category": "...", "papers": ["..."]}], "controversies": [{"topic": "...", "positions": ["..."]}], "researchGaps": ["..."], "suggestedOutline": ["..."]}`,
+返回 JSON：
+{
+  "methodClassification": [{"category": "方法类别", "papers": ["论文标题1", "论文标题2"]}],
+  "controversies": [{"topic": "争议话题", "positions": ["立场A", "立场B"]}],
+  "researchGaps": ["研究空白1", "研究空白2"],
+  "suggestedOutline": ["I. 引言与背景", "II. ...", "III. ..."]
+}`,
         messages: [
           {
             role: "user",

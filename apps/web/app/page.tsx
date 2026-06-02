@@ -6,15 +6,19 @@ import {
   chat,
   chatStream,
   confirmHumanGate,
+  convertChatToDocument,
   createProject,
   generateAllSlides,
   exportArtifactPptx,
   listArtifactBlocks,
   postProjectEvent,
+  workspaceFileDownloadUrl,
+  createAgentSession,
+  updateAgentSession,
   type ChatResult,
   type ArtifactBlockSummary,
 } from "./api-client";
-import { useChat, type Msg } from "./chat-context";
+import { useChat, type Msg, type AssistantMsg } from "./chat-context";
 import {
   IconBook,
   IconBrain,
@@ -31,23 +35,20 @@ import {
   IconWarning,
   IconZhiXu,
 } from "./icons";
+import { AgentProcessPanel } from "./components/agent-process-panel";
+import { DecisionCardSet } from "./components/decision-card-set";
+import { TaskBriefCard } from "./components/task-brief-card";
+import { CanvasPanel } from "./components/canvas-panel";
 
 type ToolCallInfo = { name: string; result?: string; loading?: boolean };
 
-type CanvasPanelState = {
-  type: "ppt";
-  artifactId: string;
-  projectId: string;
-} | null;
-
 const SUGGESTIONS = [
-  { icon: IconPPT, label: "做 PPT", desc: "解析资料，生成选题、大纲和逐页共创", prompt: "帮我做一份课程 PPT，需要先给我 3 个选题方向" },
+  { icon: IconPPT, label: "做课程 PPT", desc: "上传资料，自动选题、大纲、讲稿、导出", prompt: "帮我做一份课程 PPT，需要先给我 3 个选题方向" },
+  { icon: IconPaper, label: "组会论文汇报", desc: "上传多篇论文，自动精读、对比、做 PPT", prompt: "帮我读这几篇论文，做组会汇报 PPT" },
   { icon: IconDocument, label: "写报告", desc: "把要求、资料和证据整理成可编辑文档", prompt: "帮我整理一份课程报告，先拆解结构和资料缺口" },
-  { icon: IconPaper, label: "读论文", desc: "提炼贡献、局限、引用和组会角度", prompt: "帮我精读这篇论文，整理贡献、方法、局限和可汇报角度" },
   { icon: IconExam, label: "备考", desc: "重排计划，生成题目和错题归因", prompt: "帮我制定期末复习计划，按风险和掌握度排序" },
   { icon: IconExperiment, label: "实验", desc: "记录参数、异常归因和下次计划", prompt: "帮我整理实验记录，并生成下次实验计划" },
   { icon: IconFeedback, label: "导师反馈", desc: "拆解意见，绑定位置，追踪整改", prompt: "导师给了修改意见，帮我拆成可执行清单" },
-  { icon: IconBrain, label: "深度研究", desc: "跨多源取证、多维度对比、交叉验证，生成研究报告", prompt: "[深度研究] 请帮我对以下课题进行深度研究，覆盖规划、取证、综合、成稿全流程" },
 ];
 
 const SKILL_LABELS: Record<string, string> = {
@@ -260,11 +261,11 @@ function PPTCanvasPanel({ projectId, artifactId, onClose }: { projectId: string;
 }
 
 export default function HomePage() {
-  const { session, setSession, addMessage, updateLastAssistant, clearSession, setStreaming } = useChat();
-  const { messages, projectId } = session;
+  const { session, setSession, addMessage, updateLastAssistant, updateAgentCard, setCollaboration, clearSession, setStreaming } = useChat();
+  const { messages, projectId, agentSessionId, agentCards, collaboration } = session;
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [canvasPanel, setCanvasPanel] = useState<CanvasPanelState>(null);
+  const [agentPanelExpanded, setAgentPanelExpanded] = useState(false);
   const [converting, setConverting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const thinkingRef = useRef("");
@@ -278,19 +279,13 @@ export default function HomePage() {
     if (messages.length === 0) return;
     setConverting(true);
     try {
-      const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${BASE_URL}/api/chat/to-document`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages.filter(m => "content" in m).map(m => ({ role: m.role, content: (m as { content?: string }).content ?? "" })) }),
+      const result = await convertChatToDocument({
+        messages: messages
+          .filter(m => "content" in m)
+          .map(m => ({ role: m.role, content: (m as { content?: string }).content ?? "" })),
       });
-      if (res.ok) {
-        const body = await res.json();
-        const artifactId = body.data?.artifactId;
-        const projId = body.data?.projectId;
-        if (artifactId) {
-          window.location.href = `/studio/${artifactId}${projId ? `?projectId=${projId}` : ""}`;
-        }
+      if (result.artifactId) {
+        window.location.href = `/studio/${result.artifactId}${result.projectId ? `?projectId=${result.projectId}` : ""}`;
       }
     } catch (e) {
       console.error("Convert to doc failed:", e);
@@ -307,13 +302,30 @@ export default function HomePage() {
       title: firstMessage.slice(0, 80),
       type: "other",
       priority: 3,
-      privacyMode: "cloud",
+      privacyMode: "local_first",
       riskLevel: "L1",
     });
     setSession({ ...session, projectId: project.id });
     await postProjectEvent(project.id, { eventType: "user_goal_submitted", actorId: "user" }).catch(() => {});
     return project.id;
   }, [projectId, session, setSession]);
+
+  const ensureAgentSession = useCallback(async (pid: string, intent?: string): Promise<string> => {
+    if (agentSessionId) return agentSessionId;
+    const input: { projectId: string; workflowIntent?: string } = { projectId: pid };
+    if (intent) input.workflowIntent = intent;
+    const as = await createAgentSession(input);
+    setSession((prev) => ({ ...prev, agentSessionId: as.id }));
+    return as.id;
+  }, [agentSessionId, setSession]);
+
+  const handleDecisionSelect = useCallback(async (optionId: string) => {
+    if (!agentSessionId) return;
+    try {
+      await updateAgentSession(agentSessionId, { selectedDecision: optionId });
+      addMessage({ role: "system", content: `已选择方案 ${optionId}，Agent 正在推进...` });
+    } catch {}
+  }, [agentSessionId, addMessage]);
 
   const handleSend = useCallback(async (text?: string) => {
     const content = (text ?? input).trim();
@@ -326,9 +338,10 @@ export default function HomePage() {
 
     try {
       const pid = await ensureProject(content);
+      await ensureAgentSession(pid);
 
       const history = messages
-        .filter((message): message is Extract<Msg, { role: "user" | "assistant" }> => message.role === "user" || message.role === "assistant")
+        .filter((message): message is Msg & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
         .map((message) => {
           if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
             const toolInfo = message.toolCalls
@@ -349,7 +362,7 @@ export default function HomePage() {
       let lastRenderTime = 0;
       const RENDER_INTERVAL = 150;
 
-      const throttledUpdate = (update: Partial<Extract<Msg, { role: "assistant" }>>) => {
+      const throttledUpdate = (update: Partial<AssistantMsg>) => {
         const now = Date.now();
         if (now - lastRenderTime >= RENDER_INTERVAL) {
           lastRenderTime = now;
@@ -392,7 +405,7 @@ export default function HomePage() {
             onToolEnd: (data) => {
               streamUsed = true;
               const files = extractFileInfo(data.result ?? "");
-              const update: Partial<Extract<Msg, { role: "assistant" }>> = {
+              const update: Partial<AssistantMsg> = {
                 toolCalls: [{ name: data.functionName, result: data.result?.slice(0, 300), loading: false }],
               };
               if (files.length > 0) update.files = files;
@@ -401,7 +414,7 @@ export default function HomePage() {
             onToolResult: (data) => {
               streamUsed = true;
               const files = extractFileInfo(data.result ?? "");
-              const update: Partial<Extract<Msg, { role: "assistant" }>> = {
+              const update: Partial<AssistantMsg> = {
                 toolCalls: [{ name: data.functionName, result: data.result?.slice(0, 300), loading: false }],
               };
               if (files.length > 0) update.files = files;
@@ -431,7 +444,7 @@ export default function HomePage() {
               const finalContent = contentRef.current || data.content || "";
               const finalThinking = thinkingRef.current || data.thinking || "";
               if (finalContent) {
-                const update: Partial<Extract<Msg, { role: "assistant" }>> = { content: finalContent };
+                const update: Partial<AssistantMsg> = { content: finalContent };
                 if (finalThinking) update.thinking = finalThinking;
                 updateLastAssistant(update);
               } else if (finalThinking && !contentRef.current) {
@@ -455,7 +468,7 @@ export default function HomePage() {
         }
 
         const assistantContent = result.response.content || "";
-        const assistantMessage: Extract<Msg, { role: "assistant" }> = {
+        const assistantMessage: AssistantMsg = {
           role: "assistant",
           content: assistantContent,
         };
@@ -484,7 +497,7 @@ export default function HomePage() {
       setSending(false);
       setStreaming(false);
     }
-  }, [ensureProject, input, messages, sending, session, addMessage, updateLastAssistant, setSession, setStreaming]);
+  }, [ensureProject, ensureAgentSession, input, messages, sending, session, addMessage, updateLastAssistant, setSession, setStreaming]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -506,14 +519,15 @@ export default function HomePage() {
   };
 
   const isEmpty = messages.length === 0;
+  const hasActiveAgents = agentCards.some((c) => c.status === "working");
 
   return (
-    <div className="conv-page-outer">
-      <div className="conv-page">
+    <div className="workspace-outer">
+      <div className="workspace-conversation">
         <header className="conv-header">
           <div className="conv-header-title">
             <IconZhiXu size={18} />
-            <span>{projectId ? "任务对话进行中" : "AI 对话首页"}</span>
+            <span>{hasActiveAgents ? `${agentCards.filter(c => c.status === "working").length} 个 Agent 正在协作` : projectId ? "任务对话进行中" : "AI 对话首页"}</span>
           </div>
           <div className="conv-header-actions">
             {messages.length > 0 && (
@@ -534,7 +548,6 @@ export default function HomePage() {
                 onClick={() => {
                   clearSession();
                   setInput("");
-                  setCanvasPanel(null);
                 }}
               >
                 <IconBook size={14} />
@@ -552,7 +565,7 @@ export default function HomePage() {
             </div>
             <h1 className="conv-empty-title anim-fade-in-up delay-1">你好，知序为你准备就绪</h1>
             <p className="conv-empty-subtitle anim-fade-in-up delay-2">
-              我是你的 AI 学习科研管家，可以帮你做 PPT、写报告、读论文、准备考试，告诉我你要做什么
+              我是你的 AI 学习科研管家，可以帮你做 PPT、读论文、准备汇报，告诉我你要做什么
             </p>
             <div className="conv-suggestions">
               {SUGGESTIONS.map((suggestion, index) => {
@@ -612,22 +625,55 @@ export default function HomePage() {
                       )}
                       {msg.files && msg.files.length > 0 && (
                         <div className="conv-file-cards">
-                          {msg.files.map((file, fileIndex) => (
-                            <a
-                              key={`file-${fileIndex}`}
-                              href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/workspace/files/${encodeURIComponent(file.path)}`}
-                              className="conv-file-card"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              download
-                            >
-                              <span className="conv-file-icon">📄</span>
-                              <span className="conv-file-info">
-                                <span className="conv-file-name">{file.name}</span>
-                                <span className="conv-file-action">点击下载</span>
-                              </span>
-                            </a>
-                          ))}
+                          {msg.files.map((file, fileIndex) => {
+                            const href = workspaceFileDownloadUrl(file.path, projectId);
+                            if (!href) {
+                              return (
+                                <div key={`file-${fileIndex}`} className="conv-file-card conv-file-card-muted">
+                                  <span className="conv-file-icon">文件</span>
+                                  <span className="conv-file-info">
+                                    <span className="conv-file-name">{file.name}</span>
+                                    <span className="conv-file-action">需绑定到当前项目后下载</span>
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <a
+                                key={`file-${fileIndex}`}
+                                href={href}
+                                className="conv-file-card"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                download
+                              >
+                                <span className="conv-file-icon">文件</span>
+                                <span className="conv-file-info">
+                                  <span className="conv-file-name">{file.name}</span>
+                                  <span className="conv-file-action">点击下载</span>
+                                </span>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {msg.decisionCards && (
+                        <DecisionCardSet data={msg.decisionCards} onSelect={handleDecisionSelect} />
+                      )}
+                      {msg.taskBrief && (
+                        <TaskBriefCard brief={msg.taskBrief} />
+                      )}
+                      {msg.agentProcess && (
+                        <div className="conv-agent-status">
+                          <span className={`agent-status-dot agent-status-${msg.agentProcess.status}`} />
+                          <span className="agent-status-name">{msg.agentProcess.agentName}</span>
+                          <span className="agent-status-task">{msg.agentProcess.currentTask}</span>
+                        </div>
+                      )}
+                      {msg.agentThinking && (
+                        <div className="conv-agent-thinking">
+                          <span className={`agent-thinking-type agent-thinking-${msg.agentThinking.type}`}>{msg.agentThinking.type}</span>
+                          <span className="agent-thinking-content">{msg.agentThinking.content}</span>
                         </div>
                       )}
                       {msg.content && (
@@ -712,12 +758,21 @@ export default function HomePage() {
       </footer>
       </div>
 
-      {canvasPanel && canvasPanel.type === "ppt" && (
-        <PPTCanvasPanel
-          projectId={canvasPanel.projectId}
-          artifactId={canvasPanel.artifactId}
-          onClose={() => setCanvasPanel(null)}
-        />
+      {(agentCards.length > 0 || collaboration) && (
+        <div className={`workspace-agent-panel${agentPanelExpanded ? " workspace-agent-panel-expanded" : ""}`}>
+          <AgentProcessPanel
+            agentCards={agentCards}
+            collaboration={collaboration}
+            expanded={agentPanelExpanded}
+            onToggle={() => setAgentPanelExpanded((v) => !v)}
+          />
+        </div>
+      )}
+
+      {projectId && !isEmpty && (
+        <div className="workspace-canvas">
+          <CanvasPanel projectId={projectId} agentSessionId={agentSessionId} />
+        </div>
       )}
     </div>
   );

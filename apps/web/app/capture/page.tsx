@@ -157,7 +157,7 @@ export default function CapturePage() {
         type: selectedType,
         description: description.trim(),
         priority: 3,
-        privacyMode: "cloud",
+        privacyMode: "local_first",
         riskLevel: "L1",
       });
 

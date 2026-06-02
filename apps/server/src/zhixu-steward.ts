@@ -10,7 +10,7 @@ import {
   VerifyOutputInputSchema,
   type AgentJobSummary
 } from "@zhixu/core";
-import { DocumentPipeline, MockDocumentPipeline } from "./document-pipeline.js";
+import { DocumentPipeline } from "./document-pipeline.js";
 import type { ModelGateway } from "./model-gateway.js";
 import type { ProjectStore } from "./project-store.js";
 
@@ -88,7 +88,7 @@ export class ZhiXuSteward {
     if (sensitive) {
       await this.projectStore.createHumanGate(projectId, {
         gateType: "sensitive_cloud_processing",
-        reason: "Sensitive source requires explicit confirmation before cloud processing.",
+        reason: `Sensitive source requires explicit confirmation before cloud processing; source:${source.id}; user:${source.uploadedBy}`,
         riskLevel: "L2"
       });
       requiredConfirmations.push("sensitive_cloud_processing");
@@ -180,16 +180,20 @@ export class ZhiXuSteward {
     event: ProjectEvent
   ): Promise<StewardWorkflowRun> {
     const gateId = String(event.payload["gateId"] ?? "");
-    await this.projectStore.confirmHumanGate(gateId, { confirmedBy: event.actorId });
+    const confirmedGate = await this.projectStore.confirmHumanGate(gateId, { confirmedBy: event.actorId });
     const project = await this.projectStore.getProject(projectId);
     if (!project) {
       throw new Error(`Project not found after preflight: ${projectId}`);
     }
 
     const sourceById = new Map(project.sources.map((source) => [source.id, source]));
-    const queuedParseJobs = (await this.projectStore.listAgentJobs()).filter(
-      (job) => job.projectId === projectId && job.jobType === "parse_source" && job.status === "queued"
-    );
+    const confirmedSourceId = confirmedGate?.gateType === "sensitive_cloud_processing"
+      ? confirmedGate.reason.match(/source:([^;]+)/)?.[1]?.trim()
+      : undefined;
+    const queuedParseJobs = (await this.projectStore.listAgentJobs()).filter((job) => {
+      if (job.projectId !== projectId || job.jobType !== "parse_source" || job.status !== "queued") return false;
+      return confirmedSourceId ? job.inputRef["sourceId"] === confirmedSourceId : true;
+    });
     const completedJobs: AgentJobSummary[] = [];
     for (const job of queuedParseJobs) {
       const sourceId = String(job.inputRef["sourceId"] ?? "");
@@ -306,7 +310,45 @@ async function completeJobs(
   output: Awaited<ReturnType<DocumentPipeline["parseSource"]>>
 ): Promise<AgentJobSummary[]> {
   const completedJobs: AgentJobSummary[] = [];
+  const failed = output.riskFlags.some((flag) =>
+    flag === "source_content_unavailable" || flag === "unsupported_file_type"
+  );
+  const document = output.structuredResult["document"] as
+    | { nodes?: Array<{ text?: string; pageNumber?: number }> }
+    | undefined;
+  const nodes = Array.isArray(document?.nodes) ? document.nodes : [];
+
   for (const job of jobs) {
+    const sourceId = String(job.inputRef["sourceId"] ?? "");
+    if (sourceId) {
+      await projectStore.updateSourceProcessingStatus(sourceId, {
+        parseStatus: failed ? "failed" : "completed",
+        ocrStatus: "skipped",
+        indexStatus: failed ? "failed" : "completed"
+      });
+      if (!failed) {
+        for (const node of nodes) {
+          const quoteText = typeof node.text === "string" ? node.text.trim() : "";
+          if (!quoteText) continue;
+          const evidenceInput: {
+            sourceId: string;
+            evidenceType: string;
+            quoteText: string;
+            pageNumber?: number;
+            confidence: number;
+          } = {
+            sourceId,
+            evidenceType: "source_anchor",
+            quoteText,
+            confidence: output.confidence
+          };
+          if (typeof node.pageNumber === "number") {
+            evidenceInput.pageNumber = node.pageNumber;
+          }
+          await projectStore.addEvidence(job.projectId, evidenceInput);
+        }
+      }
+    }
     const completed = await projectStore.completeAgentJob(job.id, output);
     if (completed) completedJobs.push(completed);
   }

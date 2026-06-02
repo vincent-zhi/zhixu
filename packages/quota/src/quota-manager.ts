@@ -1,4 +1,4 @@
-import type { QuotaType, QuotaLimit, QuotaCheckResult } from "./types.js";
+import type { QuotaType, QuotaLimit, QuotaUsage, QuotaCheckResult } from "./types.js";
 
 const PLAN_LIMITS: Record<string, Partial<Record<QuotaType, number>>> = {
   free: {
@@ -39,8 +39,15 @@ const DEGRADATION_OPTIONS: Partial<Record<QuotaType, Array<{ label: string; desc
   ]
 };
 
+export interface QuotaStore {
+  getUsage(userId: string, period: string): Promise<QuotaUsage | null>;
+  setUsage(userId: string, period: string, usage: QuotaUsage): Promise<void>;
+}
+
 export class QuotaManager {
   private quotas: Map<string, QuotaLimit> = new Map();
+
+  constructor(private store?: QuotaStore) {}
 
   private key(userId: string, quotaType: QuotaType): string {
     return `${userId}:${quotaType}`;
@@ -65,8 +72,28 @@ export class QuotaManager {
     return quota;
   }
 
-  checkQuota(userId: string, quotaType: QuotaType, requestedAmount: number): QuotaCheckResult {
-    const quota = this.getOrCreateQuota(userId, quotaType);
+  private createDefaultQuota(quotaType: QuotaType): QuotaLimit {
+    const planType = "free";
+    const limitAmount = PLAN_LIMITS[planType]?.[quotaType] ?? 0;
+    return {
+      quotaType,
+      usedAmount: 0,
+      limitAmount,
+      resetAt: null,
+      planType
+    };
+  }
+
+  async checkQuota(userId: string, quotaType: QuotaType, requestedAmount: number): Promise<QuotaCheckResult> {
+    let quota: QuotaLimit;
+
+    if (this.store) {
+      const stored = await this.store.getUsage(userId, quotaType);
+      quota = stored ?? this.createDefaultQuota(quotaType);
+    } else {
+      quota = this.getOrCreateQuota(userId, quotaType);
+    }
+
     const remaining = Math.max(0, quota.limitAmount - quota.usedAmount);
     const allowed = remaining >= requestedAmount;
 
@@ -80,10 +107,19 @@ export class QuotaManager {
     };
   }
 
-  consumeQuota(userId: string, quotaType: QuotaType, amount: number): void {
-    const quota = this.getOrCreateQuota(userId, quotaType);
-    quota.usedAmount += amount;
-    this.quotas.set(this.key(userId, quotaType), quota);
+  async consumeQuota(userId: string, quotaType: QuotaType, amount: number): Promise<void> {
+    let quota: QuotaLimit;
+
+    if (this.store) {
+      const stored = await this.store.getUsage(userId, quotaType);
+      quota = stored ?? this.createDefaultQuota(quotaType);
+      quota.usedAmount += amount;
+      await this.store.setUsage(userId, quotaType, quota);
+    } else {
+      quota = this.getOrCreateQuota(userId, quotaType);
+      quota.usedAmount += amount;
+      this.quotas.set(this.key(userId, quotaType), quota);
+    }
   }
 
   getDegradationOptions(quotaType: QuotaType): Array<{ label: string; description: string; savingsPercent: number }> {

@@ -129,7 +129,7 @@ function createProjectStoreToolContext(
     addEvidence: (projectId, input) => store.addEvidence(projectId, input as any),
     addCapsule: (projectId, input) => store.addCapsule(projectId, input as any),
     addMentorFeedback: (projectId, input) => store.addMentorFeedback(projectId, input as any),
-    verifyCitations: (citations) => Promise.resolve(citationVerifier.batchVerify(citations as any)),
+    verifyCitations: (citations) => citationVerifier.verifyDoiBatch({ citations: citations as any }),
     checkWatcher: (projectId) => store.getProject(projectId).then(p => p ? watcherService.checkProject(p) : [])
   };
 }

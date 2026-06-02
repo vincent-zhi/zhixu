@@ -252,8 +252,8 @@ Achieved 92% accuracy.`;
       expect(result.venue).toBe("ICML");
       expect(result.problem).toBe("LLM extracted problem");
       expect(result.method).toBe("LLM extracted method");
-      expect((result as any).contributions).toEqual(["Contribution 1", "Contribution 2"]);
-      expect((result as any).reproducibility).toBe("Code available on GitHub");
+      expect(result.mainResults).toBe("LLM extracted results");
+      expect(result.limitations).toContain("Limitation 1");
     });
 
     it("falls back to heuristic on LLM error", async () => {

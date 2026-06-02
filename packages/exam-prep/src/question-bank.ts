@@ -31,8 +31,8 @@ export class QuestionBank {
     const questionTypes: Array<Question["type"]> = ["multiple_choice", "short_answer", "fill_blank", "calculation", "true_false"];
 
     for (let i = 0; i < count; i++) {
-      const template = typeTemplates[i % typeTemplates.length];
-      const questionType = template.options
+      const template = typeTemplates![i % typeTemplates!.length]!;
+      const questionType = template.options != null
         ? (template.options.length === 2 ? "true_false" : "multiple_choice")
         : (i % 2 === 0 ? "short_answer" : "fill_blank");
 
@@ -40,9 +40,9 @@ export class QuestionBank {
         id: `q-${nodeId}-${i + 1}`,
         type: questionType,
         nodeId,
-        question: template.question,
-        options: template.options,
-        answer: template.answer,
+        question: template!.question,
+        options: template!.options,
+        answer: template!.answer,
         explanation: `This question tests understanding of ${nodeLabel}.`,
         difficulty: Math.min(3 + Math.floor(i / 2), 5),
         responsibilityColor: "gray"

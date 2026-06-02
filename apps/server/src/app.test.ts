@@ -3,7 +3,7 @@ import { createServerApp } from "./app.js";
 
 describe("server app", () => {
   it("returns a liveness response", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({ method: "GET", url: "/health" });
 
     expect(response.statusCode).toBe(200);
@@ -13,7 +13,7 @@ describe("server app", () => {
   });
 
   it("returns seed project summaries", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({ method: "GET", url: "/api/projects" });
 
     expect(response.statusCode).toBe(200);
@@ -31,7 +31,7 @@ describe("server app", () => {
   });
 
   it("validates project creation input", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects",
@@ -47,7 +47,7 @@ describe("server app", () => {
   });
 
   it("returns a project detail with PRD workspace sections", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "GET",
       url: "/api/projects/project_course_presentation"
@@ -69,7 +69,7 @@ describe("server app", () => {
   });
 
   it("registers project sources and writes an audit log", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const createResponse = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/sources",
@@ -108,7 +108,7 @@ describe("server app", () => {
   });
 
   it("queues file parsing jobs when a source is registered", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const sourceResponse = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/sources",
@@ -143,7 +143,7 @@ describe("server app", () => {
   });
 
   it("creates project tasks with risk and responsibility metadata", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/tasks",
@@ -169,7 +169,7 @@ describe("server app", () => {
   });
 
   it("creates artifacts and updates blocks with evidence responsibility", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const artifactResponse = await app.inject({
       method: "POST",
       url: "/api/artifacts",
@@ -219,7 +219,7 @@ describe("server app", () => {
   });
 
   it("confirms human gates and records the decision", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const gateResponse = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/human-gates",
@@ -251,7 +251,7 @@ describe("server app", () => {
   });
 
   it("runs Agent Planner through the model gateway and returns governed output", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/agent/plan",
@@ -284,7 +284,7 @@ describe("server app", () => {
   });
 
   it("runs Agent Verifier and flags unsupported AI output", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/agent/verify",
@@ -312,7 +312,7 @@ describe("server app", () => {
   });
 
   it("runs a smooth steward workflow for sensitive source intake", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/events",
@@ -362,7 +362,7 @@ describe("server app", () => {
   });
 
   it("runs a smooth steward workflow for user goal planning", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/events",
@@ -399,7 +399,7 @@ describe("server app", () => {
   });
 
   it("auto-parses normal source intake and indexes evidence anchors", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/events",
@@ -443,7 +443,7 @@ describe("server app", () => {
   });
 
   it("resumes sensitive parse jobs after Human Gate confirmation event", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/events",
@@ -497,7 +497,7 @@ describe("server app", () => {
   });
 
   it("verifies artifact block updates and creates evidence review gates", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const artifactResponse = await app.inject({
       method: "POST",
       url: "/api/artifacts",
@@ -544,7 +544,7 @@ describe("server app", () => {
   });
 
   it("reflects completed projects into memory candidates", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "POST",
       url: "/api/projects/project_course_presentation/events",
@@ -590,7 +590,7 @@ describe("server app", () => {
   });
 
   it("lists built-in governed skills", async () => {
-    const app = await createServerApp({ logger: false });
+    const app = await createServerApp({ logger: false, seedDemoData: true });
     const response = await app.inject({
       method: "GET",
       url: "/api/skills"

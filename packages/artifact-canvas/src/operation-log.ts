@@ -21,7 +21,7 @@ export function undo(log: OperationLog, doc: CanvasDocument): { log: OperationLo
     return { log, doc };
   }
   const lastIndex = log.undoStack.length - 1;
-  const previousDoc = log.undoStack[lastIndex];
+  const previousDoc = log.undoStack[lastIndex]!;
   const remaining = log.undoStack.slice(0, lastIndex);
   return {
     log: {
@@ -37,7 +37,7 @@ export function redo(log: OperationLog, doc: CanvasDocument): { log: OperationLo
     return { log, doc };
   }
   const lastIndex = log.redoStack.length - 1;
-  const nextDoc = log.redoStack[lastIndex];
+  const nextDoc = log.redoStack[lastIndex]!;
   const remaining = log.redoStack.slice(0, lastIndex);
   return {
     log: {

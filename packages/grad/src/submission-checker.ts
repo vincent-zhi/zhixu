@@ -82,8 +82,8 @@ export class SubmissionChecker {
   async checkSubmissionEnhanced(
     content: string,
     venue: string,
-    llm: LLMCallable,
-    customRequirements?: string[]
+    customRequirements: string[] | undefined,
+    llm: LLMCallable
   ): Promise<SubmissionChecklist & { aiAnalysis: string[] }> {
     const basic = this.checkSubmission({ targetVenue: venue, artifactContent: content });
     try {

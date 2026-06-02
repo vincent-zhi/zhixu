@@ -1,4 +1,4 @@
-import type { UnderstandingResult, PlanOption, PlanTask, PlanDependency, SkillCandidate, ThreePlanResult } from "./types.js";
+import type { UnderstandingResult, PlanOption, PlanTask, PlanDependency, SkillCandidate, ThreePlanResult, DecisionCardSet, DecisionCardOption } from "./types.js";
 
 interface PlanConfig {
   id: string;
@@ -156,7 +156,7 @@ function buildPlanOption(
 }
 
 export class PlannerAgent {
-  generateThreePlans(understanding: UnderstandingResult): ThreePlanResult {
+  generateThreePlans(understanding: UnderstandingResult): ThreePlanResult & { decisionCards: DecisionCardSet } {
     const recommended = buildPlanOption(understanding, {
       id: "recommended",
       label: "推荐方案",
@@ -204,6 +204,54 @@ export class PlannerAgent {
 
     const comparisonSummary = `推荐方案平衡效率与质量(AI参与${Math.round(recommended.aiInvolvementRatio * 100)}%)；极速方案快速产出(AI参与${Math.round(expedited.aiInvolvementRatio * 100)}%)但质量上限较低；稳妥方案用户主导(AI参与${Math.round(conservative.aiInvolvementRatio * 100)}%)，质量最高但耗时最长。`;
 
-    return { recommended, expedited, conservative, comparisonSummary };
+    const decisionCards = this.generateDecisionCards(recommended, expedited, conservative);
+
+    return { recommended, expedited, conservative, comparisonSummary, decisionCards };
+  }
+
+  private generateDecisionCards(
+    recommended: PlanOption,
+    expedited: PlanOption,
+    conservative: PlanOption
+  ): DecisionCardSet {
+    const options: DecisionCardOption[] = [
+      {
+        id: "A",
+        title: "极速方案",
+        description: expedited.applicableScenario,
+        tradeoff: `AI参与${Math.round(expedited.aiInvolvementRatio * 100)}%，质量上限${expedited.qualityCeiling}/10，超时风险${Math.round(expedited.overtimeRisk * 100)}%`,
+        estimatedUserTime: `${expedited.userEffortHours}小时`,
+        riskLevel: expedited.overtimeRisk > 0.3 ? "L2" : "L1",
+        qualityCeiling: expedited.qualityCeiling,
+        isRecommended: false
+      },
+      {
+        id: "B",
+        title: "推荐方案",
+        description: recommended.applicableScenario,
+        tradeoff: `AI参与${Math.round(recommended.aiInvolvementRatio * 100)}%，质量上限${recommended.qualityCeiling}/10，超时风险${Math.round(recommended.overtimeRisk * 100)}%`,
+        estimatedUserTime: `${recommended.userEffortHours}小时`,
+        riskLevel: "L1",
+        qualityCeiling: recommended.qualityCeiling,
+        isRecommended: true
+      },
+      {
+        id: "C",
+        title: "稳妥方案",
+        description: conservative.applicableScenario,
+        tradeoff: `AI参与${Math.round(conservative.aiInvolvementRatio * 100)}%，质量上限${conservative.qualityCeiling}/10，超时风险${Math.round(conservative.overtimeRisk * 100)}%`,
+        estimatedUserTime: `${conservative.userEffortHours}小时`,
+        riskLevel: "L0",
+        qualityCeiling: conservative.qualityCeiling,
+        isRecommended: false
+      }
+    ];
+
+    return {
+      type: "decision_cards",
+      title: "选择执行方案",
+      recommendedOptionId: "B",
+      options
+    };
   }
 }

@@ -5,7 +5,7 @@ import { ConflictResolver } from "./conflict-resolver.js";
 export class SyncEngine {
   private resolver = new ConflictResolver();
 
-  syncToLocal(operations: PendingOperation[], cache: OfflineCacheManager): SyncResult {
+  async syncToLocal(operations: PendingOperation[], cache: OfflineCacheManager): Promise<SyncResult> {
     let applied = 0;
     let failed = 0;
     const conflicts: SyncResult["conflicts"] = [];
@@ -15,11 +15,11 @@ export class SyncEngine {
         switch (op.operationType) {
           case "create":
           case "update":
-            cache.set(`${op.entityType}:${op.entityId}`, op.payload);
+            await cache.set(`${op.entityType}:${op.entityId}`, op.payload);
             applied++;
             break;
           case "delete":
-            cache.delete(`${op.entityType}:${op.entityId}`);
+            await cache.delete(`${op.entityType}:${op.entityId}`);
             applied++;
             break;
         }
@@ -36,13 +36,13 @@ export class SyncEngine {
     };
   }
 
-  syncToRemote(cache: OfflineCacheManager, remoteEntries: OfflineCacheEntry[]): SyncResult {
+  async syncToRemote(cache: OfflineCacheManager, remoteEntries: OfflineCacheEntry[]): Promise<SyncResult> {
     let applied = 0;
     let failed = 0;
     const conflicts: SyncResult["conflicts"] = [];
 
     for (const remoteEntry of remoteEntries) {
-      const localEntry = cache.get(remoteEntry.key);
+      const localEntry = await cache.get(remoteEntry.key);
       if (localEntry) {
         const conflict = this.resolver.detectConflict(localEntry, remoteEntry);
         if (conflict) {
@@ -50,7 +50,7 @@ export class SyncEngine {
           conflicts.push(resolved);
           const options: { expiresAt?: string; encrypted?: boolean } = { encrypted: remoteEntry.encrypted };
           if (remoteEntry.expiresAt) options.expiresAt = remoteEntry.expiresAt;
-          cache.set(remoteEntry.key, remoteEntry.data, options);
+          await cache.set(remoteEntry.key, remoteEntry.data, options);
           applied++;
         } else {
           applied++;
@@ -58,7 +58,7 @@ export class SyncEngine {
       } else {
         const options: { expiresAt?: string; encrypted?: boolean } = { encrypted: remoteEntry.encrypted };
         if (remoteEntry.expiresAt) options.expiresAt = remoteEntry.expiresAt;
-        cache.set(remoteEntry.key, remoteEntry.data, options);
+        await cache.set(remoteEntry.key, remoteEntry.data, options);
         applied++;
       }
     }

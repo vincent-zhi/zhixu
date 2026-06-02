@@ -1,4 +1,4 @@
-import type { VersionSnapshot, BlockDiff, VersionDiffResult } from "./types.js";
+import type { VersionSnapshot, ArtifactVersion, BlockDiff, VersionDiffResult } from "./types.js";
 
 let versionCounter = 0;
 
@@ -7,24 +7,38 @@ function nextVersionId(): string {
   return `v_${versionCounter}_${Date.now()}`;
 }
 
+export interface VersionStore {
+  getVersions(artifactId: string): Promise<ArtifactVersion[]>;
+  saveVersion(version: ArtifactVersion): Promise<void>;
+}
+
 export class VersionManager {
   private history: Map<string, VersionSnapshot[]> = new Map();
+
+  constructor(private store?: VersionStore) {}
 
   private entityKey(entityType: string, entityId: string): string {
     return `${entityType}:${entityId}`;
   }
 
-  createSnapshot(
+  async createSnapshot(
     entityType: string,
     entityId: string,
     projectId: string,
     currentData: Record<string, unknown>,
     createdBy: string,
     reason?: string
-  ): VersionSnapshot {
+  ): Promise<VersionSnapshot> {
     const key = this.entityKey(entityType, entityId);
-    const existing = this.history.get(key);
-    const previous = existing?.[existing.length - 1] ?? null;
+
+    let previous: VersionSnapshot | null = null;
+    if (this.store) {
+      const versions = await this.store.getVersions(key);
+      previous = versions[versions.length - 1] ?? null;
+    } else {
+      const existing = this.history.get(key);
+      previous = existing?.[existing.length - 1] ?? null;
+    }
 
     let diffFromPrevious: Record<string, unknown> | null = null;
     if (previous) {
@@ -43,9 +57,13 @@ export class VersionManager {
       createdAt: new Date().toISOString()
     };
 
-    const list = existing ?? [];
-    list.push(snapshot);
-    this.history.set(key, list);
+    if (this.store) {
+      await this.store.saveVersion(snapshot);
+    } else {
+      const list = this.history.get(key) ?? [];
+      list.push(snapshot);
+      this.history.set(key, list);
+    }
 
     return snapshot;
   }
@@ -98,8 +116,11 @@ export class VersionManager {
     };
   }
 
-  getVersionHistory(entityType: string, entityId: string): VersionSnapshot[] {
+  async getVersionHistory(entityType: string, entityId: string): Promise<VersionSnapshot[]> {
     const key = this.entityKey(entityType, entityId);
+    if (this.store) {
+      return this.store.getVersions(key);
+    }
     return this.history.get(key) ?? [];
   }
 

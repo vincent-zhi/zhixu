@@ -116,6 +116,30 @@ export class CitationFixer {
     return result;
   }
 
+  async fixCitationEnhanced(
+    citation: string,
+    llm: LLMCallable
+  ): Promise<{ fixed: string; confidence: number; source: string }> {
+    const formatted = this.formatCitations([{ raw: citation, style: "APA" }]);
+    const baseline = { fixed: formatted[0]?.formatted ?? citation, confidence: 0.8, source: "heuristic" };
+    try {
+      const result = await llm.chat({
+        system: `你是一位参考文献修复助手。根据不完整的引用信息，补全缺失的元数据（title, authors, year, venue, DOI）。
+返回 JSON：{"fixed": "修复后的完整引用", "confidence": 0.0-1.0, "source": "llm"}`,
+        messages: [{ role: "user", content: citation }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return {
+        fixed: parsed.fixed ?? baseline.fixed,
+        confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.7,
+        source: parsed.source ?? "llm",
+      };
+    } catch {
+      return baseline;
+    }
+  }
+
   async fixCitationsEnhanced(
     citations: string[],
     llm: LLMCallable

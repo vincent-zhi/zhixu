@@ -20,6 +20,8 @@ export async function registerDomainRoutes(
   const { registerEfficiencyRoutes } = await import("./routes/efficiency.js");
   const { registerSenseNovaRoutes } = await import("./routes/sensenova.js");
   const { registerCollabRoutes } = await import("./routes/collab.js");
+  const { registerAgentSessionRoutes } = await import("./routes/agent-session.js");
+  const { registerWorkflowRoutes } = await import("./routes/workflow.js");
 
   await registerCoachingRoutes(fastify, store, gateway);
   await registerGradRoutes(fastify, store, gateway);
@@ -28,4 +30,10 @@ export async function registerDomainRoutes(
   await registerEfficiencyRoutes(fastify, store, gateway);
   await registerSenseNovaRoutes(fastify, options?.getImageConfig);
   await registerCollabRoutes(fastify, store, gateway);
+  try {
+    await registerAgentSessionRoutes(fastify);
+  } catch {
+    fastify.log.warn("Agent session routes skipped: DATABASE_URL not configured");
+  }
+  await registerWorkflowRoutes(fastify);
 }

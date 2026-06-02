@@ -924,4 +924,40 @@ describe("AgentPipeline", () => {
     expect(result.plans.comparisonSummary).toBeDefined();
     expect(result.plans.comparisonSummary.length).toBeGreaterThan(0);
   });
+
+  it("runCoursePresentation preserves the legacy result shape", async () => {
+    const result = await pipeline.runCoursePresentation({
+      rawInput: "我需要做一份机器学习课程PPT",
+      sources: [{ id: "source-1", fileName: "机器学习基础.pdf" }],
+      presentationDuration: 10
+    });
+
+    expect(result.type).toBe("course_presentation");
+    if (result.type !== "course_presentation") throw new Error("unexpected result type");
+    expect(result.brief.deliverableType).toBe("course_ppt");
+    expect(result.topicCandidates.length).toBeGreaterThan(0);
+    expect(result.slidePlans.length).toBeGreaterThan(0);
+    expect(result.speakerNotes.length).toBeGreaterThan(0);
+  });
+
+  it("runLabMeeting preserves the legacy result shape", async () => {
+    const result = await pipeline.runLabMeeting({
+      rawInput: "我要准备两篇论文的组会汇报",
+      sources: [
+        { id: "paper-1", fileName: "paper-1.pdf" },
+        { id: "paper-2", fileName: "paper-2.pdf" }
+      ],
+      presentationDuration: 15
+    });
+
+    expect(result.type).toBe("lab_meeting");
+    if (result.type !== "lab_meeting") throw new Error("unexpected result type");
+    expect(result.brief.deliverableType).toBe("lab_meeting");
+    expect(result.paperCards.length).toBe(2);
+    expect(result.comparisonMatrix).toBeDefined();
+    expect(result.presentationPaths.length).toBeGreaterThan(0);
+    expect(result.advisorQuestions.length).toBeGreaterThan(0);
+    expect(result.slidePlans.length).toBeGreaterThan(0);
+    expect(result.speakerNotes.length).toBeGreaterThan(0);
+  });
 });

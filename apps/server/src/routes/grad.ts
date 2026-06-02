@@ -10,27 +10,8 @@ import {
   CitationFixer,
   AcademicTrackerManager,
 } from "@zhixu/grad";
-import type { LLMCallable, ExperimentLog, GrantApplication } from "@zhixu/grad";
-
-function asLLMCallable(gateway: ModelGateway): LLMCallable | null {
-  if (!gateway.chatWithTools) return null;
-  return {
-    async chat(params) {
-      const result = await gateway.chatWithTools!({
-        messages: [
-          { role: "system", content: params.system },
-          ...params.messages.map(m => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })),
-        ],
-        systemPrompt: params.system,
-      });
-      const response = result.response as any;
-      return { content: response?.content ?? response?.choices?.[0]?.message?.content ?? "{}" };
-    },
-  };
-}
+import type { ExperimentLog, GrantApplication } from "@zhixu/grad";
+import { asLLMCallable } from "../llm-adapter.js";
 
 export async function registerGradRoutes(fastify: FastifyInstance, store: ProjectStore, gateway: ModelGateway): Promise<void> {
   const submissionChecker = new SubmissionChecker();
@@ -52,7 +33,7 @@ export async function registerGradRoutes(fastify: FastifyInstance, store: Projec
     const content = body.content ?? "";
 
     if (llm) {
-      return submissionChecker.checkSubmissionEnhanced(content, body.venue, llm, body.customRequirements);
+      return submissionChecker.checkSubmissionEnhanced(content, body.venue, body.customRequirements, llm);
     }
     return submissionChecker.checkSubmission({ targetVenue: body.venue, artifactContent: content });
   });
@@ -136,7 +117,8 @@ export async function registerGradRoutes(fastify: FastifyInstance, store: Projec
     });
 
     if (llm) {
-      const result = await gapAnalyzer.analyzeGapsEnhanced(body.papers, llm);
+      const paperTexts = body.papers.map((p: { title: string; limitations: string; futureWork: string }) => `${p.title}: ${p.limitations} ${p.futureWork}`);
+      const result = await gapAnalyzer.analyzeGapsEnhanced(paperTexts, llm);
       return { ...result, gateId: gate.id };
     }
     const gaps = gapAnalyzer.analyzeGaps(body.papers);

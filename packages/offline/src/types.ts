@@ -8,6 +8,8 @@ export interface OfflineCacheEntry {
   encrypted: boolean;
 }
 
+export type CachedItem = OfflineCacheEntry;
+
 export interface PendingOperation {
   id: string;
   entityType: string;

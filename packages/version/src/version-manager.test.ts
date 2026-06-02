@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { VersionManager } from "./version-manager.js";
 
 describe("VersionManager", () => {
-  it("creates a snapshot with a generated versionId", () => {
+  it("creates a snapshot with a generated versionId", async () => {
     const manager = new VersionManager();
-    const snapshot = manager.createSnapshot(
+    const snapshot = await manager.createSnapshot(
       "artifact",
       "art1",
       "proj1",
@@ -21,9 +21,9 @@ describe("VersionManager", () => {
     expect(snapshot.diffFromPrevious).toBeNull();
   });
 
-  it("creates a snapshot with a reason", () => {
+  it("creates a snapshot with a reason", async () => {
     const manager = new VersionManager();
-    const snapshot = manager.createSnapshot(
+    const snapshot = await manager.createSnapshot(
       "artifact",
       "art1",
       "proj1",
@@ -34,37 +34,37 @@ describe("VersionManager", () => {
     expect(snapshot.createdReason).toBe("initial draft");
   });
 
-  it("computes diffFromPrevious on second snapshot", () => {
+  it("computes diffFromPrevious on second snapshot", async () => {
     const manager = new VersionManager();
-    manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
-    const snapshot2 = manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
+    await manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
+    const snapshot2 = await manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
     expect(snapshot2.diffFromPrevious).not.toBeNull();
   });
 
-  it("returns version history", () => {
+  it("returns version history", async () => {
     const manager = new VersionManager();
-    manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
-    manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
-    const history = manager.getVersionHistory("artifact", "art1");
+    await manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
+    await manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
+    const history = await manager.getVersionHistory("artifact", "art1");
     expect(history.length).toBe(2);
   });
 
-  it("returns empty history for unknown entity", () => {
+  it("returns empty history for unknown entity", async () => {
     const manager = new VersionManager();
-    const history = manager.getVersionHistory("artifact", "unknown");
+    const history = await manager.getVersionHistory("artifact", "unknown");
     expect(history).toEqual([]);
   });
 
-  it("diffs two versions detecting added and removed blocks", () => {
+  it("diffs two versions detecting added and removed blocks", async () => {
     const manager = new VersionManager();
-    const from = manager.createSnapshot("artifact", "art1", "proj1", {
+    const from = await manager.createSnapshot("artifact", "art1", "proj1", {
       blocks: [
         { id: "b1", content: "hello" },
         { id: "b2", content: "world" }
       ]
     }, "user1");
 
-    const to = manager.createSnapshot("artifact", "art1", "proj1", {
+    const to = await manager.createSnapshot("artifact", "art1", "proj1", {
       blocks: [
         { id: "b1", content: "hello" },
         { id: "b3", content: "new" }
@@ -79,15 +79,15 @@ describe("VersionManager", () => {
     expect(diff.summary.unchanged).toBe(1);
   });
 
-  it("diffs two versions detecting modified blocks", () => {
+  it("diffs two versions detecting modified blocks", async () => {
     const manager = new VersionManager();
-    const from = manager.createSnapshot("artifact", "art1", "proj1", {
+    const from = await manager.createSnapshot("artifact", "art1", "proj1", {
       blocks: [
         { id: "b1", content: "old text" }
       ]
     }, "user1");
 
-    const to = manager.createSnapshot("artifact", "art1", "proj1", {
+    const to = await manager.createSnapshot("artifact", "art1", "proj1", {
       blocks: [
         { id: "b1", content: "new text" }
       ]
@@ -105,27 +105,27 @@ describe("VersionManager", () => {
     expect(modifiedBlock!.changes[0].newValue).toBe("new text");
   });
 
-  it("diffs flat data when no blocks array present", () => {
+  it("diffs flat data when no blocks array present", async () => {
     const manager = new VersionManager();
-    const from = manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
-    const to = manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
+    const from = await manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
+    const to = await manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
     const diff = manager.diffVersions(from, to);
     expect(diff.summary.modified).toBe(1);
   });
 
-  it("rolls back to a target version", () => {
+  it("rolls back to a target version", async () => {
     const manager = new VersionManager();
-    const v1 = manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
-    manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
+    const v1 = await manager.createSnapshot("artifact", "art1", "proj1", { title: "v1" }, "user1");
+    await manager.createSnapshot("artifact", "art1", "proj1", { title: "v2" }, "user1");
     const data = manager.rollbackToVersion(v1);
     expect(data).toEqual({ title: "v1" });
   });
 
-  it("isolates history per entity", () => {
+  it("isolates history per entity", async () => {
     const manager = new VersionManager();
-    manager.createSnapshot("artifact", "art1", "proj1", { title: "a1" }, "user1");
-    manager.createSnapshot("artifact", "art2", "proj1", { title: "a2" }, "user1");
-    expect(manager.getVersionHistory("artifact", "art1").length).toBe(1);
-    expect(manager.getVersionHistory("artifact", "art2").length).toBe(1);
+    await manager.createSnapshot("artifact", "art1", "proj1", { title: "a1" }, "user1");
+    await manager.createSnapshot("artifact", "art2", "proj1", { title: "a2" }, "user1");
+    expect((await manager.getVersionHistory("artifact", "art1")).length).toBe(1);
+    expect((await manager.getVersionHistory("artifact", "art2")).length).toBe(1);
   });
 });

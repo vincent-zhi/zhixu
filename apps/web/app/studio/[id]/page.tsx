@@ -10,6 +10,7 @@ import {
   exportArtifactPptx,
   exportArtifactDocx,
   exportArtifactMarkdown,
+  confirmHumanGate,
   verifyCitations,
   createVersion,
   listEvidence,
@@ -25,6 +26,7 @@ import {
   getVersionDiff,
   rollbackVersion,
   sensenovaGenerateImage,
+  ApiClientError,
 } from "../../api-client";
 import type {
   ProjectDetail,
@@ -96,6 +98,11 @@ export default function ArtifactStudioPage() {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [pendingExportGate, setPendingExportGate] = useState<{
+    format: "pptx" | "docx" | "markdown";
+    gateIds: string[];
+    message: string;
+  } | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatingAll, setGeneratingAll] = useState(false);
@@ -330,9 +337,9 @@ export default function ArtifactStudioPage() {
       try {
         setExporting(true);
         let blob: Blob;
-        if (format === "pptx") blob = await exportArtifactPptx(currentArtifact.id);
-        else if (format === "docx") blob = await exportArtifactDocx(currentArtifact.id);
-        else blob = await exportArtifactMarkdown(currentArtifact.id);
+        if (format === "pptx") blob = await exportArtifactPptx(currentArtifact.id, { userId: "current_user" });
+        else if (format === "docx") blob = await exportArtifactDocx(currentArtifact.id, { userId: "current_user" });
+        else blob = await exportArtifactMarkdown(currentArtifact.id, { userId: "current_user" });
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -341,13 +348,47 @@ export default function ArtifactStudioPage() {
         a.click();
         URL.revokeObjectURL(url);
       } catch (err) {
+        if (err instanceof ApiClientError && err.code === "HUMAN_GATE_REQUIRED") {
+          const gateIds = Array.isArray(err.details.pendingGates)
+            ? err.details.pendingGates.filter((gateId): gateId is string => typeof gateId === "string")
+            : [];
+          setPendingExportGate({
+            format,
+            gateIds,
+            message: err.message || "最终导出需要人工确认"
+          });
+          await loadData();
+          return;
+        }
+        if (err instanceof ApiClientError && err.code === "VERIFIER_REQUIRED") {
+          setError("导出前需要先完成 Verifier 核验，并为绿色内容绑定证据。");
+          return;
+        }
         setError(err instanceof Error ? err.message : "导出失败");
       } finally {
         setExporting(false);
       }
     },
-    [currentArtifact]
+    [currentArtifact, loadData]
   );
+
+  const handleConfirmExportGate = useCallback(async () => {
+    if (!pendingExportGate) return;
+    try {
+      setExporting(true);
+      for (const gateId of pendingExportGate.gateIds) {
+        await confirmHumanGate(gateId, { confirmedBy: "current_user" });
+      }
+      const format = pendingExportGate.format;
+      setPendingExportGate(null);
+      await loadData();
+      await handleExport(format);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "确认导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }, [handleExport, loadData, pendingExportGate]);
 
   const handleVerifyCitations = useCallback(async () => {
     if (!selectedBlock) return;
@@ -606,6 +647,22 @@ export default function ArtifactStudioPage() {
 
           <div className="console-section">
             <div className="console-label">快速操作</div>
+            {pendingExportGate && (
+              <div className="export-gate-panel">
+                <div>
+                  <strong>导出待确认</strong>
+                  <p>{pendingExportGate.message}</p>
+                </div>
+                <button
+                  className="console-action-btn"
+                  onClick={handleConfirmExportGate}
+                  disabled={exporting || pendingExportGate.gateIds.length === 0}
+                >
+                  <IconCheck size={14} />
+                  确认并导出
+                </button>
+              </div>
+            )}
             <div className="console-actions">
               <button
                 className="console-action-btn"

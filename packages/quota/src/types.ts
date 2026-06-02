@@ -33,3 +33,4 @@ export const QuotaCheckResultSchema = z.object({
 export type QuotaType = z.infer<typeof QuotaTypeSchema>;
 export type QuotaLimit = z.infer<typeof QuotaLimitSchema>;
 export type QuotaCheckResult = z.infer<typeof QuotaCheckResultSchema>;
+export type QuotaUsage = QuotaLimit;

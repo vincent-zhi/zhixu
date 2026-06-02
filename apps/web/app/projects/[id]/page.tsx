@@ -12,6 +12,10 @@ import {
   transitionProject,
   confirmHumanGate,
   postProjectEvent,
+  addMentorFeedback,
+  createPPTArtifact,
+  examPlan,
+  paperRead,
 } from "../../api-client";
 import type {
   ProjectDetail,
@@ -61,6 +65,15 @@ const QUICK_ACTIONS = [
   { label: "提取知识胶囊", trigger: "extract_capsule" },
 ];
 
+type CapabilityKey = "paper_read" | "exam_plan" | "mentor_feedback" | "ppt_cocreate";
+
+const CAPABILITY_ACTIONS: Array<{ key: CapabilityKey; label: string; desc: string }> = [
+  { key: "paper_read", label: "Paper Read", desc: "Extract contribution, method, evidence and limits from the first source." },
+  { key: "exam_plan", label: "Exam Plan", desc: "Create a two-week review plan from project context." },
+  { key: "mentor_feedback", label: "Mentor Feedback", desc: "Turn mentor comments into bound action items." },
+  { key: "ppt_cocreate", label: "PPT Co-create", desc: "Create a project PPT artifact and topic seed." },
+];
+
 type ContextTab = "sources" | "evidence" | "tasks" | "activity" | "collab";
 
 function getStateIndex(status: ProjectStatus): number {
@@ -93,6 +106,10 @@ export default function ProjectWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const [confirmingGateId, setConfirmingGateId] = useState<string | null>(null);
+  const [capabilityRunning, setCapabilityRunning] = useState<CapabilityKey | null>(null);
+  const [capabilityResult, setCapabilityResult] = useState<string | null>(null);
+  const [mentorFeedbackInput, setMentorFeedbackInput] = useState("");
+  const [showMentorDialog, setShowMentorDialog] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -179,6 +196,55 @@ export default function ProjectWorkspacePage() {
       }
     },
     [project, projectId, loadAll]
+  );
+
+  const handleCapabilityRun = useCallback(
+    async (key: CapabilityKey) => {
+      if (!project) return;
+      try {
+        setCapabilityRunning(key);
+        setCapabilityResult(null);
+        if (key === "paper_read") {
+          const source = sources[0];
+          if (!source) {
+            setError("Add a source before running Paper Read.");
+            return;
+          }
+          const result = await paperRead(projectId, { sourceId: source.id });
+          setCapabilityResult(`Paper Read ready: ${Object.keys(result).join(", ")}`);
+        } else if (key === "exam_plan") {
+          const examDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+          const result = await examPlan(projectId, { examDate, dailyHours: 2 });
+          setCapabilityResult(`Exam Plan ready: ${Object.keys(result).join(", ")}`);
+        } else if (key === "mentor_feedback") {
+          if (!mentorFeedbackInput.trim()) {
+            setShowMentorDialog(true);
+            setCapabilityRunning(null);
+            return;
+          }
+          const result = await addMentorFeedback(projectId, {
+            sourceType: "manual",
+            rawContent: mentorFeedbackInput.trim(),
+            feedbackType: "revision"
+          });
+          setCapabilityResult(`Mentor Feedback ready: ${result.actionItems.length} action items`);
+          setMentorFeedbackInput("");
+          setShowMentorDialog(false);
+        } else {
+          const result = await createPPTArtifact(projectId, {
+            title: `${project.title} PPT`,
+            topicSuggestions: [project.title]
+          });
+          setCapabilityResult(`PPT artifact ready: ${result.artifact.title}`);
+        }
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Capability failed");
+      } finally {
+        setCapabilityRunning(null);
+      }
+    },
+    [project, projectId, sources, mentorFeedbackInput, loadAll]
   );
 
   const handleCommandSubmit = useCallback(() => {
@@ -324,6 +390,68 @@ export default function ProjectWorkspacePage() {
 
         <section className="workspace-center">
           <div className="center-title">交互时间线</div>
+
+          <div className="center-section">
+            <div className="center-section-label">Capability Panel</div>
+            <div className="work-card-grid">
+              {CAPABILITY_ACTIONS.map((action) => (
+                <div key={action.key} className="work-card">
+                  <div className="work-card-header">
+                    <strong>{action.label}</strong>
+                    <span className="status-badge status-planned">API</span>
+                  </div>
+                  <p className="work-card-body">{action.desc}</p>
+                  <div className="work-card-actions">
+                    <button
+                      className="btn-secondary btn-sm"
+                      disabled={capabilityRunning !== null}
+                      onClick={() => handleCapabilityRun(action.key)}
+                    >
+                      {capabilityRunning === action.key ? "Running..." : "Run"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {capabilityResult && <div className="command-success">{capabilityResult}</div>}
+            {showMentorDialog && (
+              <div className="work-card" style={{ border: "1px solid var(--color-border)", marginTop: 8 }}>
+                <div className="work-card-header">
+                  <strong>输入导师反馈</strong>
+                </div>
+                <textarea
+                  className="command-input"
+                  style={{ width: "100%", minHeight: 80, resize: "vertical", marginBottom: 8 }}
+                  placeholder="请输入导师反馈内容…"
+                  value={mentorFeedbackInput}
+                  onChange={(e) => setMentorFeedbackInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.metaKey) {
+                      handleCapabilityRun("mentor_feedback");
+                    }
+                  }}
+                />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button
+                    className="btn-secondary btn-sm"
+                    onClick={() => {
+                      setShowMentorDialog(false);
+                      setMentorFeedbackInput("");
+                    }}
+                  >
+                    取消
+                  </button>
+                  <button
+                    className="btn-primary btn-sm"
+                    disabled={!mentorFeedbackInput.trim() || capabilityRunning !== null}
+                    onClick={() => handleCapabilityRun("mentor_feedback")}
+                  >
+                    {capabilityRunning === "mentor_feedback" ? "提交中…" : "提交反馈"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {pendingGates.length > 0 && (
             <div className="center-section">

@@ -12,7 +12,9 @@ import {
   UpdateArtifactBlockInputSchema,
   VerifyOutputInputSchema,
   type AgentOutput,
-  type ArtifactBlockSummary
+  type ArtifactSummary,
+  type ArtifactBlockSummary,
+  type RiskLevel
 } from "@zhixu/core";
 import { getPrismaClient, PrismaProjectStore } from "@zhixu/db";
 import {
@@ -20,6 +22,7 @@ import {
   PptxRenderer,
   DocxRenderer,
   MarkdownRenderer,
+  PdfRenderer,
   PptExportInputSchema,
   DocExportInputSchema
 } from "@zhixu/artifact-factory";
@@ -35,7 +38,7 @@ import { WatcherService } from "./watcher.js";
 import { CitationVerifier } from "./citation-verifier.js";
 import { DocumentPipeline } from "./document-pipeline.js";
 import { QuotaManager } from "./quota-manager.js";
-import { ProjectEventSchema } from "@zhixu/agent-core";
+import { isSensitiveSourceLevel, ProjectEventSchema } from "@zhixu/agent-core";
 import { TaskStateMachine, type StateDefinition } from "@zhixu/agent-os";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, createReadStream } from "node:fs";
 import { join, extname } from "node:path";
@@ -49,25 +52,29 @@ import {
 } from "@zhixu/skill-runtime";
 import { SkillRegistry } from "./skill-registry.js";
 import { registerDomainRoutes } from "./domain-routes.js";
+import { getSenseNovaSkillDetail, getSenseNovaSkillsSummary } from "./sensenova-skill-loader.js";
+import { invokeSenseNovaSkill, type SenseNovaSkillInvokeBody } from "./sensenova-agent-skill-runner.js";
 
 export interface CreateServerAppOptions extends FastifyServerOptions {
   projectStore?: ProjectStore;
   modelGateway?: ModelGateway;
   storeType?: "memory" | "prisma";
   llmConfig?: LLMGatewayConfig;
+  seedDemoData?: boolean;
 }
 
 export async function createServerApp(
   options: CreateServerAppOptions = {}
 ): Promise<FastifyInstance> {
-  const storeType = options.storeType ?? (process.env.STORE_TYPE === "prisma" ? "prisma" : "memory");
+  const storeType = options.storeType ?? (process.env.DATABASE_URL ? "prisma" : "memory");
   const projectStore: ProjectStore =
     options.projectStore ??
     (storeType === "prisma"
-      ? new PrismaProjectStore(getPrismaClient()) as unknown as ProjectStore
-      : new InMemoryProjectStore());
+      ? new PrismaProjectStore(getPrismaClient())
+      : new InMemoryProjectStore(options.seedDemoData));
   const watcher = new WatcherService(projectStore);
   const citationVerifier = new CitationVerifier();
+  const isTestEnvironment = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
 
   const llmConfigPath = join(process.cwd(), ".zhixu-llm-config.json");
 
@@ -127,7 +134,7 @@ export async function createServerApp(
     } catch {}
   }
 
-  let llmConfig = options.llmConfig ?? loadPersistedLLMConfig() ?? (
+  let llmConfig = options.llmConfig ?? (isTestEnvironment ? undefined : loadPersistedLLMConfig()) ?? (
     process.env.LLM_API_KEY && process.env.LLM_BASE_URL && process.env.LLM_MODEL
       ? {
           apiKey: process.env.LLM_API_KEY,
@@ -150,7 +157,8 @@ export async function createServerApp(
   const exportPipeline = new ExportPipeline(
     new PptxRenderer(),
     new DocxRenderer(),
-    new MarkdownRenderer()
+    new MarkdownRenderer(),
+    new PdfRenderer()
   );
   registerBuiltinSkillHandlers(skillRunner, skills, modelGateway, projectStore, exportPipeline, examQuestions, examSubmissions, termbaseEntries, citationVerifier);
   const app = Fastify({
@@ -173,6 +181,62 @@ export async function createServerApp(
       app.log.warn({ error }, "Failed to initialize LLM ModelGateway, falling back to mock");
     }
   }
+  if (modelGateway instanceof MockModelGateway) {
+    app.log.warn("AI 功能不可用，请配置 LLM API Key");
+  }
+  registerSenseNovaChatTools(modelGateway);
+
+  function registerSenseNovaChatTools(gateway: ModelGateway): void {
+    const registry = (gateway as unknown as {
+      toolRegistry?: {
+        register?: (definition: Record<string, unknown>, handler: (args: Record<string, unknown>) => Promise<string>) => void;
+        hasTool?: (name: string) => boolean;
+      };
+    }).toolRegistry;
+
+    if (!registry?.register || registry.hasTool?.("invoke_sensenova_skill")) return;
+
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "list_sensenova_skills",
+          description: "List SenseNova AgentSkills discovered from SKILL.md folders so available skills can be explicit in chat.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      async () => JSON.stringify({ skills: getSenseNovaSkillsSummary() })
+    );
+
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "invoke_sensenova_skill",
+          description: "Invoke a SenseNova AgentSkill by name. Returns explicit SKILL.md context and can execute a Python script inside that skill directory.",
+          parameters: {
+            type: "object",
+            properties: {
+              skillName: { type: "string", description: "SenseNova skill name, for example sn-search-academic or sn-ppt-entry." },
+              script: { type: "string", description: "Optional relative Python script path inside the skill directory." },
+              args: { type: "array", items: { type: "string" }, description: "Optional script arguments." },
+              query: { type: "string", description: "Optional query for supported adapters such as sn-search-academic." },
+              platforms: { type: "array", items: { type: "string" }, description: "Optional platform list for supported search adapters." },
+              limit: { type: "number", description: "Optional result limit." },
+            },
+            required: ["skillName"],
+          },
+        },
+      },
+      async (args) => {
+        const skillName = typeof args.skillName === "string" ? args.skillName : "";
+        const skill = getSenseNovaSkillDetail(skillName);
+        if (!skill) return JSON.stringify({ error: "skill_not_found", skillName });
+        const result = await invokeSenseNovaSkill(skill, args as SenseNovaSkillInvokeBody);
+        return JSON.stringify(result);
+      }
+    );
+  }
 
   await app.register(helmet);
   await app.register(cors, {
@@ -184,6 +248,117 @@ export async function createServerApp(
       fileSize: 100 * 1024 * 1024,
     },
   });
+
+  async function persistSourceParseResult(
+    projectId: string,
+    sourceId: string,
+    output: AgentOutput,
+    jobs: Array<{ id: string }>
+  ): Promise<void> {
+    const failed = output.riskFlags.some((flag) =>
+      flag === "source_content_unavailable" || flag === "unsupported_file_type"
+    );
+    await projectStore.updateSourceProcessingStatus(sourceId, {
+      parseStatus: failed ? "failed" : "completed",
+      ocrStatus: "skipped",
+      indexStatus: failed ? "failed" : "completed"
+    });
+
+    if (!failed) {
+      const document = output.structuredResult["document"] as
+        | { nodes?: Array<{ id?: string; text?: string; pageNumber?: number }> }
+        | undefined;
+      const nodes = Array.isArray(document?.nodes) ? document.nodes : [];
+      for (const node of nodes) {
+        const quoteText = typeof node.text === "string" ? node.text.trim() : "";
+        if (!quoteText) continue;
+        const evidenceInput: {
+          sourceId: string;
+          evidenceType: string;
+          quoteText: string;
+          pageNumber?: number;
+          confidence: number;
+        } = {
+          sourceId,
+          evidenceType: "source_anchor",
+          quoteText,
+          confidence: output.confidence
+        };
+        if (typeof node.pageNumber === "number") {
+          evidenceInput.pageNumber = node.pageNumber;
+        }
+        await projectStore.addEvidence(projectId, evidenceInput);
+      }
+    }
+
+    for (const job of jobs) {
+      await projectStore.completeAgentJob(job.id, output);
+    }
+  }
+
+  function getBodyUserId(request: { body: unknown }, fallback: string): string {
+    const body = request.body as { userId?: unknown } | undefined;
+    return typeof body?.userId === "string" && body.userId.trim()
+      ? body.userId
+      : fallback;
+  }
+
+  function getRequestUserId(request: unknown, fallback = "anonymous"): string {
+    const requestUserId = (request as Record<string, unknown>)["userId"];
+    return typeof requestUserId === "string" && requestUserId.trim()
+      ? requestUserId
+      : fallback;
+  }
+
+  function exportGateReason(artifactId: string, userId: string): string {
+    return `Final export requires verifier review and explicit confirmation; artifact:${artifactId}; user:${userId}`;
+  }
+
+  function matchesExportGate(
+    gate: { gateType: string; reason: string; status: string },
+    artifactId: string,
+    userId: string
+  ): boolean {
+    return gate.gateType === "artifact_export" &&
+      gate.reason.includes(`artifact:${artifactId}`) &&
+      gate.reason.includes(`user:${userId}`);
+  }
+
+  function verifyArtifactForExport(
+    artifact: ArtifactSummary
+  ): { allowed: true } | { allowed: false; message: string; issues: string[] } {
+    const issues: string[] = [];
+    for (const block of artifact.blocks) {
+      if (block.verificationStatus !== "verified") {
+        issues.push(`block:${block.id}:verification_required`);
+      }
+      const evidenceRefs = block.contentJson["evidenceRefs"];
+      const hasEvidenceRefs = Array.isArray(evidenceRefs) && evidenceRefs.length > 0;
+      if (block.responsibilityColor === "green" && !hasEvidenceRefs) {
+        issues.push(`block:${block.id}:evidence_refs_required`);
+      }
+    }
+
+    return issues.length === 0
+      ? { allowed: true }
+      : {
+          allowed: false,
+          message: "Artifact must pass verifier checks and evidence coverage before export confirmation",
+          issues
+        };
+  }
+
+  function parseSkillPermissionGate(
+    reason: string
+  ): { skillId: string; userId: string; projectId: string; scopes: string[] } | null {
+    const skillId = reason.match(/skill:([^;]+)/)?.[1]?.trim();
+    const userId = reason.match(/user:([^;]+)/)?.[1]?.trim();
+    const projectId = reason.match(/project:([^;]+)/)?.[1]?.trim();
+    const scopes = reason.match(/scopes:([^;]+)/)?.[1]?.split(",").map((scope) => scope.trim()).filter(Boolean) ?? [];
+    return skillId && userId && projectId && scopes.length > 0
+      ? { skillId, userId, projectId, scopes }
+      : null;
+  }
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -478,6 +653,15 @@ export async function createServerApp(
       });
     }
     const source = await projectStore.addSource(request.params.projectId, input);
+    if (isSensitiveSourceLevel(source.sensitivityLevel)) {
+      await projectStore.createHumanGate(request.params.projectId, {
+        gateType: "sensitive_cloud_processing",
+        reason: `Sensitive source requires explicit confirmation before cloud processing; source:${source.id}; user:${source.uploadedBy}`,
+        riskLevel: "L2"
+      });
+      return reply.status(201).send({ data: source });
+    }
+
     try {
       const pipeline = new DocumentPipeline();
       const parseResult = await pipeline.parseSource({
@@ -492,9 +676,20 @@ export async function createServerApp(
         indexStatus: source.indexStatus,
         sensitivityLevel: source.sensitivityLevel,
         createdAt: source.createdAt
-      }, `# ${source.fileName}\n\nPlaceholder content for ${source.fileType} file.`);
+      });
+      const jobs = (await projectStore.listAgentJobs()).filter(
+        (job) =>
+          job.projectId === request.params.projectId &&
+          job.jobType === "parse_source" &&
+          job.inputRef["sourceId"] === source.id
+      );
+      await persistSourceParseResult(request.params.projectId, source.id, parseResult, jobs);
       app.log.info({ sourceId: source.id, parseResult }, "Source parsed successfully");
     } catch (error) {
+      await projectStore.updateSourceProcessingStatus(source.id, {
+        parseStatus: "failed",
+        indexStatus: "failed"
+      });
       app.log.warn({ sourceId: source.id, error }, "Source parsing failed");
     }
     return reply.status(201).send({ data: source });
@@ -648,6 +843,13 @@ export async function createServerApp(
       return reply.status(200).send({ data: result });
     } catch (error) {
       if (error instanceof HumanGateRequiredError) {
+        const gate = projectId
+          ? await projectStore.createHumanGate(projectId, {
+              gateType: "skill_permission",
+              reason: `Skill permission grant required; skill:${error.skillId}; user:${userId}; project:${projectId}; scopes:${error.missingScopes.join(",")}`,
+              riskLevel: error.riskLevel as RiskLevel
+            })
+          : null;
         return reply.status(403).send({
           error: {
             code: "HUMAN_GATE_REQUIRED",
@@ -655,6 +857,7 @@ export async function createServerApp(
             skillId: error.skillId,
             missingScopes: error.missingScopes,
             riskLevel: error.riskLevel,
+            pendingGates: gate ? [gate.id] : [],
             requestId: request.id
           }
         });
@@ -665,6 +868,60 @@ export async function createServerApp(
 
   function findPendingGates(project: { humanGates: Array<{ id: string; status: string; gateType: string; reason: string }> }): Array<{ id: string; status: string; gateType: string; reason: string }> {
     return project.humanGates.filter((g) => g.status === "pending");
+  }
+
+  async function requireExportHumanGate(
+    artifact: ArtifactSummary,
+    userId: string
+  ): Promise<
+    | { allowed: true }
+    | { allowed: false; code: "VERIFIER_REQUIRED"; pendingGates: string[]; message: string; issues: string[] }
+    | { allowed: false; code: "HUMAN_GATE_REQUIRED"; pendingGates: string[]; message: string }
+  > {
+    const verifier = verifyArtifactForExport(artifact);
+    if (!verifier.allowed) {
+      return {
+        allowed: false,
+        code: "VERIFIER_REQUIRED",
+        message: verifier.message,
+        issues: verifier.issues,
+        pendingGates: []
+      };
+    }
+
+    const project = await projectStore.getProject(artifact.projectId);
+    if (!project) return { allowed: true };
+
+    const pendingGates = findPendingGates(project).filter((gate) =>
+      matchesExportGate(gate, artifact.id, userId)
+    );
+    if (pendingGates.length > 0) {
+      return {
+        allowed: false,
+        code: "HUMAN_GATE_REQUIRED",
+        message: "Artifact has pending human gate confirmations that must be resolved before export",
+        pendingGates: pendingGates.map((g) => g.id)
+      };
+    }
+
+    const hasConfirmedExportGate = project.humanGates.some(
+      (gate) => gate.status === "confirmed" && matchesExportGate(gate, artifact.id, userId)
+    );
+    if (hasConfirmedExportGate) {
+      return { allowed: true };
+    }
+
+    const gate = await projectStore.createHumanGate(artifact.projectId, {
+      gateType: "artifact_export",
+      reason: exportGateReason(artifact.id, userId),
+      riskLevel: "L2"
+    });
+    return {
+      allowed: false,
+      code: "HUMAN_GATE_REQUIRED",
+      message: "Final export requires verifier review and Human Gate confirmation before generating a file",
+      pendingGates: [gate.id]
+    };
   }
 
   app.post<{
@@ -681,7 +938,7 @@ export async function createServerApp(
       });
     }
 
-    const exportUserId = (request as unknown as Record<string, unknown>).userId as string;
+    const exportUserId = getBodyUserId(request, getRequestUserId(request));
     const quotaResult = quotaManager.consumeQuota(exportUserId, "export", 1);
     if (!quotaResult.allowed) {
       return reply.status(429).send({
@@ -694,19 +951,17 @@ export async function createServerApp(
       });
     }
 
-    const project = await projectStore.getProject(artifact.projectId);
-    if (project) {
-      const pendingGates = findPendingGates(project);
-      if (pendingGates.length > 0) {
-        return reply.status(403).send({
-          error: {
-            code: "HUMAN_GATE_REQUIRED",
-            message: "Artifact has pending human gate confirmations that must be resolved before export",
-            pendingGates: pendingGates.map((g) => g.id),
-            requestId: request.id
-          }
-        });
-      }
+    const exportGate = await requireExportHumanGate(artifact, exportUserId);
+    if (!exportGate.allowed) {
+      return reply.status(403).send({
+        error: {
+          code: exportGate.code,
+          message: exportGate.message,
+          pendingGates: exportGate.pendingGates,
+          issues: "issues" in exportGate ? exportGate.issues : undefined,
+          requestId: request.id
+        }
+      });
     }
 
     const pptInput = PptExportInputSchema.parse({
@@ -749,7 +1004,7 @@ export async function createServerApp(
       });
     }
 
-    const exportUserId = (request as unknown as Record<string, unknown>).userId as string;
+    const exportUserId = getBodyUserId(request, getRequestUserId(request));
     const quotaResult = quotaManager.consumeQuota(exportUserId, "export", 1);
     if (!quotaResult.allowed) {
       return reply.status(429).send({
@@ -762,19 +1017,17 @@ export async function createServerApp(
       });
     }
 
-    const project = await projectStore.getProject(artifact.projectId);
-    if (project) {
-      const pendingGates = findPendingGates(project);
-      if (pendingGates.length > 0) {
-        return reply.status(403).send({
-          error: {
-            code: "HUMAN_GATE_REQUIRED",
-            message: "Artifact has pending human gate confirmations that must be resolved before export",
-            pendingGates: pendingGates.map((g) => g.id),
-            requestId: request.id
-          }
-        });
-      }
+    const exportGate = await requireExportHumanGate(artifact, exportUserId);
+    if (!exportGate.allowed) {
+      return reply.status(403).send({
+        error: {
+          code: exportGate.code,
+          message: exportGate.message,
+          pendingGates: exportGate.pendingGates,
+          issues: "issues" in exportGate ? exportGate.issues : undefined,
+          requestId: request.id
+        }
+      });
     }
 
     const docInput = DocExportInputSchema.parse({
@@ -813,7 +1066,7 @@ export async function createServerApp(
       });
     }
 
-    const exportUserId = (request as unknown as Record<string, unknown>).userId as string;
+    const exportUserId = getBodyUserId(request, getRequestUserId(request));
     const quotaResult = quotaManager.consumeQuota(exportUserId, "export", 1);
     if (!quotaResult.allowed) {
       return reply.status(429).send({
@@ -826,19 +1079,17 @@ export async function createServerApp(
       });
     }
 
-    const project = await projectStore.getProject(artifact.projectId);
-    if (project) {
-      const pendingGates = findPendingGates(project);
-      if (pendingGates.length > 0) {
-        return reply.status(403).send({
-          error: {
-            code: "HUMAN_GATE_REQUIRED",
-            message: "Artifact has pending human gate confirmations that must be resolved before export",
-            pendingGates: pendingGates.map((g) => g.id),
-            requestId: request.id
-          }
-        });
-      }
+    const exportGate = await requireExportHumanGate(artifact, exportUserId);
+    if (!exportGate.allowed) {
+      return reply.status(403).send({
+        error: {
+          code: exportGate.code,
+          message: exportGate.message,
+          pendingGates: exportGate.pendingGates,
+          issues: "issues" in exportGate ? exportGate.issues : undefined,
+          requestId: request.id
+        }
+      });
     }
 
     const mdInput = DocExportInputSchema.parse({
@@ -1419,6 +1670,19 @@ export async function createServerApp(
           requestId: request.id
         }
       });
+    }
+
+    if (gate.gateType === "skill_permission") {
+      const grant = parseSkillPermissionGate(gate.reason);
+      if (grant) {
+        permissionChecker.grantPermission({
+          skillId: grant.skillId,
+          userId: grant.userId,
+          projectId: grant.projectId,
+          grantedScopes: grant.scopes,
+          riskLevel: gate.riskLevel
+        });
+      }
     }
 
     return { data: gate };
@@ -2155,6 +2419,62 @@ export async function createServerApp(
     return reply.send({ data: { configured: false } });
   });
 
+  app.post("/api/chat/to-document", async (request, reply) => {
+    const body = request.body as {
+      messages?: Array<{ role: string; content: string }>;
+      projectId?: string;
+      title?: string;
+    };
+    const messages = Array.isArray(body.messages)
+      ? body.messages.filter((message) => typeof message.content === "string" && message.content.trim().length > 0)
+      : [];
+    if (messages.length === 0) {
+      return reply.status(422).send({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "messages array with content is required",
+          requestId: request.id
+        }
+      });
+    }
+
+    const userId = (request as unknown as Record<string, unknown>).userId as string;
+    let projectId = body.projectId;
+    if (!projectId) {
+      const project = await projectStore.createProject({
+        workspaceId: "default",
+        ownerId: userId,
+        title: body.title ?? "Chat Document",
+        type: "other",
+        priority: 3,
+        riskLevel: "L1",
+        privacyMode: "local_first"
+      });
+      projectId = project.id;
+    }
+
+    const transcript = messages
+      .map((message) => `${message.role}: ${message.content.trim()}`)
+      .join("\n\n");
+    const artifact = await projectStore.createArtifact({
+      projectId,
+      type: "document",
+      title: body.title ?? "对话整理文档",
+      firstBlock: {
+        blockType: "paragraph",
+        contentJson: { text: transcript, source: "chat" },
+        createdBy: userId
+      }
+    });
+
+    return reply.status(201).send({
+      data: {
+        projectId,
+        artifactId: artifact.id
+      }
+    });
+  });
+
   const ZHIXU_STREAM_SYSTEM_PROMPT = `你是"知序"，一个专业的AI学习科研助手。你可以帮助用户：
 1. 创建和管理研究项目
 2. 制作PPT演示文稿
@@ -2197,7 +2517,7 @@ export async function createServerApp(
     const chatInput: { messages: Array<{ role: "system" | "user" | "assistant" | "tool"; content: string | null }>; systemPrompt?: string } = {
       messages: body.messages as any
     };
-    chatInput.systemPrompt = body.systemPrompt || ZHIXU_STREAM_SYSTEM_PROMPT;
+    chatInput.systemPrompt = ZHIXU_STREAM_SYSTEM_PROMPT;
 
     let result;
     try {
@@ -2268,7 +2588,7 @@ export async function createServerApp(
 
     try {
       const chatMessages = body.messages as Array<{ role: "system" | "user" | "assistant" | "tool"; content: string | null; toolCalls?: unknown[]; toolCallId?: string }>;
-      const systemPrompt = body.systemPrompt || ZHIXU_STREAM_SYSTEM_PROMPT;
+      const systemPrompt = ZHIXU_STREAM_SYSTEM_PROMPT;
 
       if (typeof (gw as unknown as Record<string, unknown>).streamChat === "function") {
         const gwWithStream = gw as unknown as { streamChat: (input: { messages: Array<{ role: "system" | "user" | "assistant" | "tool"; content: string | null; toolCalls?: unknown[]; toolCallId?: string }>; systemPrompt?: string }) => AsyncGenerator<import("@zhixu/model-gateway").StreamChunk> };
@@ -2312,21 +2632,23 @@ export async function createServerApp(
                 fullContent += chunk.content;
                 sendEvent("content_delta", { content: chunk.content });
                 break;
-              case "tool_call_start":
-                currentToolCalls.set(chunk.toolCallId, {
-                  id: chunk.toolCallId,
-                  functionName: chunk.functionName,
+              case "tool_call_start": {
+                const tcId = chunk.toolCallId ?? "";
+                currentToolCalls.set(tcId, {
+                  id: tcId,
+                  functionName: chunk.functionName ?? "",
                   arguments: chunk.arguments ?? "",
                 });
                 sendEvent("tool_start", {
-                  toolCallId: chunk.toolCallId,
-                  functionName: chunk.functionName,
+                  toolCallId: tcId,
+                  functionName: chunk.functionName ?? "",
                 });
                 break;
+              }
               case "tool_call_delta": {
-                const existing = currentToolCalls.get(chunk.toolCallId);
+                const existing = currentToolCalls.get(chunk.toolCallId ?? "");
                 if (existing) {
-                  existing.arguments += chunk.arguments;
+                  existing.arguments += chunk.arguments ?? "";
                 }
                 break;
               }
@@ -2484,7 +2806,7 @@ export async function createServerApp(
   app.post("/api/citations/verify", async (request) => {
     const body = request.body as { citations?: Array<{ rawText: string; doi?: string; title?: string; year?: number }> };
     const citations = Array.isArray(body?.citations) ? body.citations : [];
-    return { data: await citationVerifier.batchVerify(citations) };
+    return { data: await citationVerifier.verifyDoiBatch({ citations, concurrency: 3 }) };
   });
 
   app.post<{
@@ -2735,6 +3057,82 @@ export async function createServerApp(
     };
   });
 
+  app.get("/api/materials", async () => {
+    const projects = await projectStore.listProjects();
+    const materials: Array<{
+      id: string;
+      fileName: string;
+      fileType: string;
+      projectId: string;
+      projectTitle: string;
+      parseStatus: string;
+      uploadedAt: string;
+      uploadedBy: string;
+      sensitivityLevel: string;
+      summary?: string;
+      storageUri: string;
+    }> = [];
+
+    for (const project of projects) {
+      const detail = await projectStore.getProject(project.id);
+      if (!detail) continue;
+      for (const source of detail.sources) {
+        materials.push({
+          id: source.id,
+          fileName: source.fileName,
+          fileType: source.fileType,
+          projectId: detail.id,
+          projectTitle: detail.title,
+          parseStatus: source.parseStatus,
+          uploadedAt: source.createdAt,
+          uploadedBy: source.uploadedBy,
+          sensitivityLevel: source.sensitivityLevel,
+          storageUri: source.storageUri
+        });
+      }
+    }
+
+    materials.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+    return { data: materials };
+  });
+
+  app.get("/api/schedule", async () => {
+    const projects = await projectStore.listProjects();
+    const events: Array<{
+      id: string;
+      title: string;
+      projectTitle: string;
+      projectId: string;
+      type: "task" | "exam" | "meeting" | "deadline" | "review";
+      dueAt: string;
+      priority: number;
+      status: string;
+      riskLevel?: string;
+    }> = [];
+
+    for (const project of projects) {
+      const detail = await projectStore.getProject(project.id);
+      if (!detail) continue;
+      for (const task of detail.tasks) {
+        if (!task.dueAt) continue;
+        events.push({
+          id: task.id,
+          title: task.title,
+          projectTitle: detail.title,
+          projectId: detail.id,
+          type: detail.type === "exam_review" ? "exam" : "task",
+          dueAt: task.dueAt,
+          priority: task.priority,
+          status: task.status,
+          riskLevel: task.riskLevel
+        });
+      }
+    }
+
+    events.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+    return { data: events };
+  });
+
   app.get<{
     Params: { artifactId: string };
     Querystring: { from: string; to: string };
@@ -2789,17 +3187,7 @@ export async function createServerApp(
 
   const users = new Map<string, AuthUser>();
   const tokens = new Map<string, string>();
-  const demoUserId = randomUUID();
-  const isDemoMode = process.env.DEMO_MODE === "true";
-  users.set("demo@zhixu.ai", {
-    id: demoUserId,
-    email: "demo@zhixu.ai",
-    passwordHash: createHash("sha256").update("demo123").digest("hex"),
-    name: "演示用户",
-    educationStage: "undergraduate",
-    discipline: "计算机科学",
-    createdAt: new Date().toISOString()
-  });
+  const isDemoMode = process.env.DEMO_MODE === "true" || isTestEnvironment;
 
   function verifyAuth(request: { headers: Record<string, string | undefined> }): string | null {
     const authHeader = request.headers["authorization"];
@@ -2816,7 +3204,7 @@ export async function createServerApp(
     const userId = verifyAuth(request as unknown as { headers: Record<string, string | undefined> });
     if (!userId) {
       if (isDemoMode) {
-        (request as unknown as Record<string, unknown>).userId = demoUserId;
+        (request as unknown as Record<string, unknown>).userId = "anonymous";
       } else {
         reply.status(401).send({ error: "UNAUTHORIZED", message: "请先登录" });
         return;
@@ -2909,9 +3297,25 @@ export async function createServerApp(
     return { data: { success: true } };
   });
 
+  function isProjectWorkspacePath(filename: string, projectId: string): boolean {
+    const normalized = filename.replace(/\\/g, "/").replace(/^\/+/, "");
+    return normalized.startsWith(`projects/${projectId}/`) || normalized.startsWith(`${projectId}/`);
+  }
+
   app.get("/api/workspace/files/*", async (request, reply) => {
     const wildcard = (request.params as Record<string, string>)["*"] ?? "";
     const filename = decodeURIComponent(wildcard);
+    const projectId = (request.query as { projectId?: string }).projectId;
+    if (!projectId || typeof projectId !== "string") {
+      return reply.status(403).send({ error: { code: "FORBIDDEN", message: "Workspace file downloads require a projectId" } });
+    }
+    const project = await projectStore.getProject(projectId);
+    if (!project) {
+      return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    }
+    if (!isProjectWorkspacePath(filename, projectId)) {
+      return reply.status(403).send({ error: { code: "FORBIDDEN", message: "File is not scoped to the requested project" } });
+    }
     const { resolve, sep } = await import("node:path");
     const { existsSync, statSync, createReadStream } = await import("node:fs");
     const workspaceRoot = resolve(process.env.ZHIXU_WORKSPACE ?? join(process.cwd(), "workspace"));
@@ -2952,9 +3356,17 @@ export async function createServerApp(
     return reply.send(createReadStream(absPath));
   });
 
-  app.get("/api/workspace/list", async (_request, reply) => {
-    const { resolve, sep, join: pathJoin } = await import("node:path");
+  app.get("/api/workspace/list", async (request, reply) => {
+    const { resolve, join: pathJoin } = await import("node:path");
     const { readdirSync, statSync, existsSync } = await import("node:fs");
+    const projectId = (request.query as { projectId?: string }).projectId;
+    if (!projectId || typeof projectId !== "string") {
+      return reply.status(403).send({ error: { code: "FORBIDDEN", message: "Workspace listing requires a projectId" } });
+    }
+    const project = await projectStore.getProject(projectId);
+    if (!project) {
+      return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    }
     const workspaceRoot = resolve(process.env.ZHIXU_WORKSPACE ?? pathJoin(process.cwd(), "workspace"));
     if (!existsSync(workspaceRoot)) return { files: [] };
     const files: Array<{ name: string; path: string; size: number; type: string }> = [];
@@ -2971,7 +3383,13 @@ export async function createServerApp(
         }
       }
     }
-    walk(workspaceRoot, "");
+    const preferredProjectRoot = pathJoin(workspaceRoot, "projects", projectId);
+    const fallbackProjectRoot = pathJoin(workspaceRoot, projectId);
+    if (existsSync(preferredProjectRoot)) {
+      walk(preferredProjectRoot, `projects/${projectId}`);
+    } else if (existsSync(fallbackProjectRoot)) {
+      walk(fallbackProjectRoot, projectId);
+    }
     return { files };
   });
 
@@ -3217,7 +3635,7 @@ function registerBuiltinSkillHandlers(
               citationTexts.push({ rawText: match[1] ?? "" });
             }
           }
-          const results = await citationVerifier.batchVerify(citationTexts);
+          const results = await citationVerifier.verifyDoiBatch({ citations: citationTexts });
           const verified = results.filter((r) => r.status === "verified").length;
           const issues = results.filter((r) => r.status !== "verified").flatMap((r) => r.issues);
           return {

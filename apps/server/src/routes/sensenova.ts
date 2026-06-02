@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { loadSenseNovaSkills, getSenseNovaSkillsSummary, getSenseNovaSkillDetail } from "../sensenova-skill-loader.js";
+import { getSenseNovaSkillsSummary, getSenseNovaSkillDetail } from "../sensenova-skill-loader.js";
 import { generateImage, recognizeImage, SENSENOVA_IMAGE_SIZES, type SenseNovaImageConfig } from "../sensenova-image.js";
+import { invokeSenseNovaSkill, type SenseNovaSkillInvokeBody } from "../sensenova-agent-skill-runner.js";
 
 /**
  * Register SenseNova-specific API routes.
@@ -21,6 +22,21 @@ export async function registerSenseNovaRoutes(
     const skill = getSenseNovaSkillDetail(skillName);
     if (!skill) return reply.status(404).send({ error: "skill_not_found" });
     return skill;
+  });
+
+  fastify.post("/api/sensenova/skills/:skillName/invoke", async (req, reply) => {
+    const { skillName } = req.params as { skillName: string };
+    const skill = getSenseNovaSkillDetail(skillName);
+    if (!skill) return reply.status(404).send({ error: "skill_not_found" });
+
+    try {
+      return await invokeSenseNovaSkill(skill, (req.body ?? {}) as SenseNovaSkillInvokeBody);
+    } catch (error) {
+      return reply.status(400).send({
+        error: "skill_invocation_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   // --- Image Generation ---

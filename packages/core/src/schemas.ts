@@ -44,7 +44,7 @@ export const CreateProjectInputSchema = z.object({
   description: z.string().trim().max(2000).optional(),
   dueDate: z.coerce.date().optional(),
   priority: z.number().int().min(0).max(5).default(3),
-  privacyMode: z.enum(["cloud", "local_first", "private_org"]).default("cloud"),
+  privacyMode: z.enum(["cloud", "local_first", "private_org"]).default("local_first"),
   riskLevel: RiskLevelSchema.default("L1")
 });
 
@@ -295,4 +295,281 @@ export type ArtifactBlockSummary = z.infer<typeof ArtifactBlockSummarySchema>;
 export type ArtifactSummary = z.infer<typeof ArtifactSummarySchema>;
 export type HumanGateSummary = z.infer<typeof HumanGateSummarySchema>;
 export type AuditLogSummary = z.infer<typeof AuditLogSummarySchema>;
+
+export const WorkflowIntentSchema = z.enum(["course_presentation", "lab_meeting", "general"]);
+
+export const AgentPhaseSchema = z.enum([
+  "task_capture",
+  "understanding",
+  "planning",
+  "decision",
+  "source_parsing",
+  "paper_reading",
+  "matrix_generation",
+  "outline_generation",
+  "content_generation",
+  "speaker_notes",
+  "verification",
+  "human_gate",
+  "export_ready",
+  "dispatching",
+  "reflection",
+  "completed"
+]);
+
+export const AgentStatusSchema = z.enum(["idle", "working", "waiting", "completed", "failed"]);
+
+export const PresentationBriefSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  deliverableType: z.enum(["course_ppt", "lab_meeting", "exam_review"]),
+  presentationDuration: z.number(),
+  deadline: z.string().nullable(),
+  targetAudience: z.string(),
+  sourceIds: z.array(z.string()),
+  missingInfo: z.array(z.string()),
+  detectedCourseName: z.string().nullable(),
+  requiresSpeakerNotes: z.boolean().default(true),
+  requiresEnglish: z.boolean().default(false),
+  pageRequirement: z.number().nullable()
+});
+
+export const DecisionCardOptionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  tradeoff: z.string(),
+  estimatedUserTime: z.string(),
+  riskLevel: RiskLevelSchema,
+  qualityCeiling: z.number().min(1).max(10),
+  isRecommended: z.boolean()
+});
+
+export const DecisionCardSetSchema = z.object({
+  type: z.literal("decision_cards"),
+  title: z.string(),
+  recommendedOptionId: z.string(),
+  options: z.array(DecisionCardOptionSchema)
+});
+
+export const TopicCandidateExtendedSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  angle: z.string(),
+  targetAudience: z.string(),
+  estimatedSlides: z.number().int().min(5).max(30),
+  sourceCoverage: z.number().min(0).max(1),
+  difficultyLevel: z.enum(["easy", "medium", "hard"]),
+  errorRisk: z.string(),
+  canFillDuration: z.boolean(),
+  recommendationReason: z.string(),
+  riskLevel: RiskLevelSchema
+});
+
+export const SlidePlanSchema = z.object({
+  id: z.string(),
+  orderIndex: z.number().int().min(0),
+  title: z.string(),
+  objective: z.string(),
+  keyPoints: z.array(z.string()),
+  evidenceRefs: z.array(z.string()),
+  responsibilityColor: ResponsibilityColorSchema,
+  speakerNotes: z.string(),
+  estimatedDurationSeconds: z.number(),
+  layoutType: z.enum(["title", "content", "two_column", "image_focus", "comparison", "data_highlight", "section", "closing", "blank"]),
+  status: z.enum(["proposed", "confirmed", "generating", "completed", "needs_revision"])
+});
+
+export const SpeakerNotesSchema = z.object({
+  slideId: z.string(),
+  spokenText: z.string(),
+  estimatedDurationSeconds: z.number(),
+  pacingWarning: z.string().nullable(),
+  keyTransition: z.string()
+});
+
+export const PaperCardSchema = z.object({
+  id: z.string(),
+  sourceId: z.string(),
+  projectId: z.string(),
+  title: z.string(),
+  authors: z.array(z.string()),
+  year: z.number(),
+  venue: z.string(),
+  doi: z.string().nullable(),
+  researchQuestion: z.string(),
+  backgroundMotivation: z.string(),
+  methodFramework: z.string(),
+  dataset: z.string(),
+  metricsAndResults: z.string(),
+  mainContributions: z.string(),
+  limitations: z.string(),
+  reproducibility: z.string(),
+  keyFigures: z.array(z.string()),
+  references: z.array(z.string()),
+  evidencePageNumbers: z.record(z.string(), z.array(z.number())),
+  responsibilityColor: ResponsibilityColorSchema
+});
+
+export const PaperComparisonMatrixSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  papers: z.array(PaperCardSchema),
+  comparisonFields: z.array(z.object({
+    field: z.string(),
+    values: z.record(z.string(), z.string())
+  })),
+  methodCategories: z.array(z.string()),
+  timeline: z.array(z.object({ year: z.number(), event: z.string() })),
+  controversies: z.array(z.object({
+    topic: z.string(),
+    positions: z.array(z.object({ sourceId: z.string(), position: z.string() }))
+  })),
+  researchGaps: z.array(z.string()),
+  suggestedOutline: z.array(z.object({ section: z.string(), keyPoints: z.array(z.string()) }))
+});
+
+export const PresentationPathSchema = z.object({
+  id: z.string(),
+  pathType: z.enum(["deep_dive", "comparison", "evolution"]),
+  title: z.string(),
+  description: z.string(),
+  suitableScenario: z.string(),
+  estimatedSlides: z.number(),
+  estimatedDuration: z.number(),
+  focusPapers: z.array(z.string()),
+  outlineSections: z.array(z.string()),
+  riskLevel: RiskLevelSchema,
+  isRecommended: z.boolean()
+});
+
+export const AdvisorQuestionSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  question: z.string(),
+  category: z.enum(["method", "data", "result", "reproducibility", "extension", "weakness"]),
+  relatedSourceIds: z.array(z.string()),
+  suggestedAnswer: z.string(),
+  difficultyLevel: z.enum(["basic", "intermediate", "challenging"]),
+  evidenceRefs: z.array(z.string())
+});
+
+export const EvidenceCoverageReportSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  artifactId: z.string(),
+  totalClaims: z.number(),
+  greenClaims: z.number(),
+  yellowClaims: z.number(),
+  grayClaims: z.number(),
+  greenRatio: z.number(),
+  yellowRatio: z.number(),
+  grayRatio: z.number(),
+  unverifiedCitations: z.number(),
+  highRiskItems: z.array(z.string())
+});
+
+export const ProgressDetailSchema = z.object({
+  label: z.string(),
+  status: z.enum(["completed", "in_progress", "queued", "failed", "skipped"]),
+  detail: z.string(),
+  percentage: z.number().min(0).max(100)
+});
+
+export const ThinkingEntrySchema = z.object({
+  timestamp: z.string(),
+  type: z.enum(["decision", "observation", "plan", "error"]),
+  content: z.string(),
+  relatedEvidence: z.array(z.string()).optional()
+});
+
+export const AgentProcessCardSchema = z.object({
+  agentId: z.string(),
+  agentName: z.string(),
+  agentIcon: z.string(),
+  agentRole: z.string(),
+  status: AgentStatusSchema,
+  currentTask: z.string(),
+  progress: z.array(ProgressDetailSchema),
+  inputFrom: z.array(z.string()),
+  outputTo: z.array(z.string()),
+  thinkingLog: z.array(ThinkingEntrySchema),
+  startedAt: z.string(),
+  estimatedCompletion: z.string().nullable()
+});
+
+export const AgentProcessUpdateSchema = z.object({
+  agentId: z.string(),
+  agentName: z.string(),
+  status: AgentStatusSchema,
+  currentTask: z.string(),
+  progress: z.array(ProgressDetailSchema),
+  outputPreview: z.record(z.string(), z.unknown()).optional()
+});
+
+export const CollaborationSnapshotSchema = z.object({
+  agents: z.array(z.object({
+    agentId: z.string(),
+    agentName: z.string(),
+    status: AgentStatusSchema
+  })),
+  edges: z.array(z.object({
+    from: z.string(),
+    to: z.string(),
+    dataType: z.string()
+  })),
+  bottleneck: z.string().nullable(),
+  elapsedTime: z.number(),
+  estimatedRemaining: z.number().nullable()
+});
+
+export const CanvasPatchSchema = z.object({
+  artifactId: z.string(),
+  operation: z.enum(["upsert_block", "delete_block", "update_block", "bind_evidence", "set_responsibility"]),
+  blockType: z.string(),
+  contentJson: z.record(z.string(), z.unknown()),
+  evidenceRefs: z.array(z.string()),
+  responsibilityColor: ResponsibilityColorSchema,
+  orderIndex: z.number().optional()
+});
+
+export const AgentSessionSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  workflowIntent: WorkflowIntentSchema,
+  currentPhase: AgentPhaseSchema,
+  brief: PresentationBriefSchema.nullable(),
+  selectedDecision: z.string().nullable(),
+  canvasState: z.record(z.string(), z.unknown()),
+  progressEvents: z.array(z.object({
+    phase: AgentPhaseSchema,
+    message: z.string(),
+    timestamp: z.string(),
+    percentage: z.number()
+  })),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export type WorkflowIntent = z.infer<typeof WorkflowIntentSchema>;
+export type AgentPhase = z.infer<typeof AgentPhaseSchema>;
+export type AgentStatus = z.infer<typeof AgentStatusSchema>;
+export type PresentationBrief = z.infer<typeof PresentationBriefSchema>;
+export type DecisionCardOption = z.infer<typeof DecisionCardOptionSchema>;
+export type DecisionCardSet = z.infer<typeof DecisionCardSetSchema>;
+export type TopicCandidateExtended = z.infer<typeof TopicCandidateExtendedSchema>;
+export type SlidePlan = z.infer<typeof SlidePlanSchema>;
+export type SpeakerNotes = z.infer<typeof SpeakerNotesSchema>;
+export type PaperCard = z.infer<typeof PaperCardSchema>;
+export type PaperComparisonMatrix = z.infer<typeof PaperComparisonMatrixSchema>;
+export type PresentationPath = z.infer<typeof PresentationPathSchema>;
+export type AdvisorQuestion = z.infer<typeof AdvisorQuestionSchema>;
+export type EvidenceCoverageReport = z.infer<typeof EvidenceCoverageReportSchema>;
+export type ProgressDetail = z.infer<typeof ProgressDetailSchema>;
+export type ThinkingEntry = z.infer<typeof ThinkingEntrySchema>;
+export type AgentProcessCard = z.infer<typeof AgentProcessCardSchema>;
+export type AgentProcessUpdate = z.infer<typeof AgentProcessUpdateSchema>;
+export type CollaborationSnapshot = z.infer<typeof CollaborationSnapshotSchema>;
+export type CanvasPatch = z.infer<typeof CanvasPatchSchema>;
+export type AgentSession = z.infer<typeof AgentSessionSchema>;
 export type ProjectDetail = z.infer<typeof ProjectDetailSchema>;

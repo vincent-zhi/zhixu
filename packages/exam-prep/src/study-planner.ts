@@ -18,7 +18,7 @@ export class StudyPlanner {
     for (let day = 1; day <= totalDays; day++) {
       const dayDate = new Date(today);
       dayDate.setDate(dayDate.getDate() + day - 1);
-      const dateStr = dayDate.toISOString().split("T")[0];
+      const dateStr = dayDate.toISOString().split("T")[0] ?? "";
 
       const nodeStart = ((day - 1) * 2) % sortedNodes.length;
       const dayNodes = [
@@ -26,11 +26,11 @@ export class StudyPlanner {
         sortedNodes[(nodeStart + 1) % sortedNodes.length]
       ].filter(Boolean);
 
-      const topics = dayNodes.map(n => n.label);
+      const topics = dayNodes.map(n => n!.label);
       const tasks = dayNodes.map((node, i) => ({
-        type: taskTypes[(day - 1 + i) % taskTypes.length],
-        nodeId: node.id,
-        description: `${taskTypes[(day - 1 + i) % taskTypes.length]}: ${node.label}`,
+        type: taskTypes[(day - 1 + i) % taskTypes.length]!,
+        nodeId: node!.id,
+        description: `${taskTypes[(day - 1 + i) % taskTypes.length]!}: ${node!.label}`,
         estimatedMinutes: Math.floor(dailyMinutes / dayNodes.length)
       }));
 
@@ -39,7 +39,7 @@ export class StudyPlanner {
         if (mistakeNodes.length > 0) {
           tasks.push({
             type: "review_mistakes",
-            nodeId: mistakeNodes[0].id,
+            nodeId: mistakeNodes[0]!.id,
             description: `Review mistakes: ${mistakeNodes.map(m => m.label).join(", ")}`,
             estimatedMinutes: Math.floor(dailyMinutes * 0.2)
           });

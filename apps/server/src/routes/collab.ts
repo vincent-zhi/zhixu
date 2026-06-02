@@ -25,7 +25,7 @@ export async function registerCollabRoutes(fastify: FastifyInstance, store: Proj
       recipientIds: string[];
       expiresAt?: string;
     };
-    const share = sharingManager.createShare({
+    const share = await sharingManager.createShare({
       projectId,
       sharedBy: body.sharedBy,
       shareType: body.shareType,
@@ -35,21 +35,21 @@ export async function registerCollabRoutes(fastify: FastifyInstance, store: Proj
     const existing = shareStore.get(projectId) ?? [];
     existing.push(share);
     shareStore.set(projectId, existing);
-    return share;
+    return { data: share };
   });
 
   fastify.get("/api/projects/:projectId/collab/shares", async (req) => {
     const { projectId } = req.params as { projectId: string };
-    return shareStore.get(projectId) ?? [];
+    return { data: shareStore.get(projectId) ?? [] };
   });
 
   fastify.delete("/api/projects/:projectId/collab/shares/:shareId", async (req, reply) => {
     const { projectId, shareId } = req.params as { projectId: string; shareId: string };
-    const revoked = sharingManager.revokeShare(shareId);
+    const revoked = await sharingManager.revokeShare(shareId);
     if (!revoked) return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Share not found" } });
     const existing = shareStore.get(projectId) ?? [];
     shareStore.set(projectId, existing.filter((s) => s.id !== shareId));
-    return { revoked: true };
+    return { data: { revoked: true } };
   });
 
   // ── Shared Knowledge Base ────────────────────────────────────
@@ -76,24 +76,24 @@ export async function registerCollabRoutes(fastify: FastifyInstance, store: Proj
         accessPolicy: body.accessPolicy ?? "team_only",
       });
       kbStore.set(projectId, kb);
-      return kb;
+      return { data: kb };
     }
 
     if (body.action === "add_entry") {
       const kb = kbStore.get(projectId);
-      if (!kb) return { error: "no_knowledgebase" };
+      if (!kb) return { data: { error: "no_knowledgebase" } };
       const entry = kbManager.addEntry(kb, body.entry!);
-      return entry;
+      return { data: entry };
     }
 
-    return { error: "unknown_action" };
+    return { data: { error: "unknown_action" } };
   });
 
   fastify.get("/api/projects/:projectId/collab/knowledgebase", async (req) => {
     const { projectId } = req.params as { projectId: string };
     const kb = kbStore.get(projectId);
-    if (!kb) return [];
-    return kb.entries;
+    if (!kb) return { data: [] };
+    return { data: kb.entries };
   });
 
   // ── Progress Board ───────────────────────────────────────────
@@ -105,7 +105,7 @@ export async function registerCollabRoutes(fastify: FastifyInstance, store: Proj
       board = boardManager.createBoard(projectId);
       boardStore.set(projectId, board);
     }
-    return board;
+    return { data: board };
   });
 
   fastify.post("/api/projects/:projectId/collab/progress-board", async (req, reply) => {
@@ -125,12 +125,12 @@ export async function registerCollabRoutes(fastify: FastifyInstance, store: Proj
 
     if (body.action === "add_column") {
       const column = boardManager.addColumn(board, body.title ?? "New Column");
-      return column;
+      return { data: column };
     }
 
     if (body.action === "move_task") {
       boardManager.moveTask(board, body.taskId ?? "", body.targetColumnId ?? "");
-      return board;
+      return { data: board };
     }
 
     return reply.status(400).send({ error: { code: "INVALID_ACTION", message: "Unknown action" } });
@@ -155,11 +155,12 @@ export async function registerCollabRoutes(fastify: FastifyInstance, store: Proj
     const members = query.members ? JSON.parse(query.members) : [];
     const activities = query.activities ? JSON.parse(query.activities) : [];
 
-    return contributionTracker.generateReport({
+    const report = contributionTracker.generateReport({
       projectId,
       period,
       members,
       activities,
     });
+    return { data: report };
   });
 }

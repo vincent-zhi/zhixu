@@ -45,3 +45,12 @@ export interface LLMResponse {
   model: string;
   finishReason: string;
 }
+
+export interface StreamChunk {
+  type: "thinking_start" | "thinking_delta" | "thinking_end" | "content_delta" | "tool_call_start" | "tool_call_delta" | "done";
+  content?: string;
+  toolCallId?: string;
+  functionName?: string;
+  arguments?: string;
+  finishReason?: string;
+}

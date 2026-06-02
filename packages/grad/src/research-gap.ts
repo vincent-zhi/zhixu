@@ -112,21 +112,31 @@ export class ResearchGapAnalyzer {
   }
 
   async analyzeGapsEnhanced(
-    papers: Array<{ title: string; limitations: string; futureWork: string }>,
+    papers: string[],
     llm: LLMCallable
-  ): Promise<{ gaps: ResearchGap[]; aiDirections: Array<{ direction: string; rationale: string; feasibility: number }> }> {
-    const gaps = this.analyzeGaps(papers);
+  ): Promise<ResearchGap[] & { aiDirections: Array<{ direction: string; rationale: string; feasibility: number }> }> {
+    const structuredPapers = papers.map((p, i) => ({
+      title: `Paper ${i + 1}`,
+      limitations: p,
+      futureWork: p,
+    }));
+    const gaps = this.analyzeGaps(structuredPapers);
     try {
       const result = await llm.chat({
         system: `你是一位科研方向规划助手。综合多篇论文的局限性和未来工作，推荐 3-5 个可行的研究方向。
 返回 JSON：{"directions": [{"direction": "研究方向描述", "rationale": "基于哪些论文的什么空白", "feasibility": 0.0-1.0}]}`,
-        messages: [{ role: "user", content: `论文摘要和局限性：\n${papers.slice(0, 5).map((p, i) => `论文${i + 1}：${p.title}\n局限性：${p.limitations}\n未来工作：${p.futureWork}`).join("\n\n")}` }],
+        messages: [{ role: "user", content: `论文内容：\n${papers.slice(0, 5).map((p, i) => `论文${i + 1}：\n${p.slice(0, 2000)}`).join("\n\n")}` }],
         responseFormat: { type: "json_object" },
       });
       const parsed = JSON.parse(result.content);
-      return { gaps, aiDirections: parsed.directions ?? [] };
+      const aiDirections: Array<{ direction: string; rationale: string; feasibility: number }> = (parsed.directions ?? []).map((d: any) => ({
+        direction: d.direction ?? "",
+        rationale: d.rationale ?? "",
+        feasibility: typeof d.feasibility === "number" ? d.feasibility : 0.5,
+      }));
+      return Object.assign(gaps, { aiDirections });
     } catch {
-      return { gaps, aiDirections: [] };
+      return Object.assign(gaps, { aiDirections: [] });
     }
   }
 }

@@ -2,22 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { ProjectStore } from "../project-store.js";
 import type { ModelGateway } from "../model-gateway.js";
 import { TermbaseManager, FragmentCollector, CrossProjectLinker, StyleUnifier, FormatConverter, ContentDeduplicator } from "@zhixu/efficiency";
+import { asLLMCallable } from "../llm-adapter.js";
 
-function asLLMCallable(gateway: ModelGateway): import("@zhixu/efficiency").LLMCallable | null {
-  if (!gateway.chatWithTools) return null;
-  return {
-    async chat(params) {
-      const result = await gateway.chatWithTools!({
-        messages: [{ role: "system", content: params.system }, ...params.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content }))],
-        systemPrompt: params.system,
-      });
-      const response = result.response as any;
-      return { content: response?.content ?? response?.choices?.[0]?.message?.content ?? "{}" };
-    },
-  };
-}
-
-// In-memory termbase store (per-project)
 const termbaseStore = new Map<string, import("@zhixu/efficiency").Termbase>();
 const fragmentStore = new Map<string, import("@zhixu/efficiency").FragmentNote[]>();
 

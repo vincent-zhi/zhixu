@@ -88,7 +88,7 @@ model Project {
   priority      Int           @default(3)
   status        ProjectStatus @default(captured)
   currentState  Json          @default("{}")
-  privacyMode   String        @default("cloud")
+  privacyMode   String        @default("local_first")
   riskLevel     RiskLevel     @default(L1)
   sources       Source[]
   tasks         Task[]
@@ -101,12 +101,30 @@ model Project {
   capsules      KnowledgeCapsule[]
   skillInvocations SkillInvocation[]
   mentorFeedback  MentorFeedback[]
+  agentSessions   AgentSession[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
   @@index([workspaceId])
   @@index([ownerId])
   @@index([status])
+}
+
+model AgentSession {
+  id               String   @id @default(cuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id])
+  workflowIntent   String   @default("general")
+  currentPhase     String   @default("task_capture")
+  briefJson        Json     @default("{}")
+  selectedDecision String?
+  canvasStateJson  Json     @default("{}")
+  progressJson     Json     @default("[]")
+  agentsJson       Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([projectId])
 }
 
 model Source {

@@ -44,6 +44,7 @@ export interface SocraticQuestion {
   question: string;
   followUpQuestions: string[];
   relatedConcept: string;
+  verificationStatus?: "green" | "yellow";
 }
 
 export interface MeetingBrief {
@@ -66,6 +67,7 @@ export interface DiagnosticReport {
   strengthAreas: string[];
   recommendations: string[];
   knowledgeRetention: number;
+  verificationStatus?: "green" | "yellow";
 }
 
 /** Minimal LLM interface for domain enhancement — avoids hard dependency on @zhixu/model-gateway */

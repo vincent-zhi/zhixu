@@ -6,70 +6,70 @@ import { SyncEngine } from "./sync-engine.js";
 import type { OfflineCacheEntry, PendingOperation } from "./types.js";
 
 describe("OfflineCacheManager", () => {
-  it("sets and gets a cache entry", () => {
+  it("sets and gets a cache entry", async () => {
     const cache = new OfflineCacheManager();
-    const entry = cache.set("user:1", { name: "Alice" });
+    const entry = await cache.set("user:1", { name: "Alice" });
 
     expect(entry.key).toBe("user:1");
     expect(entry.version).toBe(1);
     expect(entry.encrypted).toBe(false);
 
-    const retrieved = cache.get("user:1");
+    const retrieved = await cache.get("user:1");
     expect(retrieved).not.toBeNull();
     expect((retrieved!.data as Record<string, string>).name).toBe("Alice");
   });
 
-  it("returns null for missing key", () => {
+  it("returns null for missing key", async () => {
     const cache = new OfflineCacheManager();
-    expect(cache.get("missing")).toBeNull();
+    expect(await cache.get("missing")).toBeNull();
   });
 
-  it("increments version on subsequent sets", () => {
+  it("increments version on subsequent sets", async () => {
     const cache = new OfflineCacheManager();
-    cache.set("key", "v1");
-    const entry = cache.set("key", "v2");
+    await cache.set("key", "v1");
+    const entry = await cache.set("key", "v2");
     expect(entry.version).toBe(2);
   });
 
-  it("deletes a cache entry", () => {
+  it("deletes a cache entry", async () => {
     const cache = new OfflineCacheManager();
-    cache.set("key", "data");
-    expect(cache.delete("key")).toBe(true);
-    expect(cache.get("key")).toBeNull();
-    expect(cache.delete("key")).toBe(false);
+    await cache.set("key", "data");
+    expect(await cache.delete("key")).toBe(true);
+    expect(await cache.get("key")).toBeNull();
+    expect(await cache.delete("key")).toBe(false);
   });
 
-  it("lists all keys", () => {
+  it("lists all keys", async () => {
     const cache = new OfflineCacheManager();
-    cache.set("a", 1);
-    cache.set("b", 2);
-    cache.set("c", 3);
+    await cache.set("a", 1);
+    await cache.set("b", 2);
+    await cache.set("c", 3);
     expect(cache.listKeys().sort()).toEqual(["a", "b", "c"]);
   });
 
-  it("cleans up expired entries", () => {
+  it("cleans up expired entries", async () => {
     const cache = new OfflineCacheManager();
     const past = new Date(Date.now() - 10000).toISOString();
-    cache.set("expired", "old", { expiresAt: past });
-    cache.set("valid", "new", { expiresAt: new Date(Date.now() + 100000).toISOString() });
+    await cache.set("expired", "old", { expiresAt: past });
+    await cache.set("valid", "new", { expiresAt: new Date(Date.now() + 100000).toISOString() });
 
     const removed = cache.cleanup();
     expect(removed).toBe(1);
-    expect(cache.get("expired")).toBeNull();
-    expect(cache.get("valid")).not.toBeNull();
+    expect(await cache.get("expired")).toBeNull();
+    expect(await cache.get("valid")).not.toBeNull();
   });
 
-  it("exports all entries", () => {
+  it("exports all entries", async () => {
     const cache = new OfflineCacheManager();
-    cache.set("a", 1);
-    cache.set("b", 2);
+    await cache.set("a", 1);
+    await cache.set("b", 2);
     const exported = cache.exportAll();
     expect(exported).toHaveLength(2);
   });
 
-  it("imports entries keeping newer versions", () => {
+  it("imports entries keeping newer versions", async () => {
     const cache = new OfflineCacheManager();
-    cache.set("key", "local", { encrypted: false });
+    await cache.set("key", "local", { encrypted: false });
 
     const remoteEntry: OfflineCacheEntry = {
       key: "key",
@@ -83,13 +83,13 @@ describe("OfflineCacheManager", () => {
 
     const imported = cache.importAll([remoteEntry]);
     expect(imported).toBe(1);
-    expect((cache.get("key")!.data as string)).toBe("remote");
+    expect((await cache.get("key"))!.data as string).toBe("remote");
   });
 
-  it("skips importing older versions", () => {
+  it("skips importing older versions", async () => {
     const cache = new OfflineCacheManager();
-    cache.set("key", "local");
-    const localEntry = cache.get("key")!;
+    await cache.set("key", "local");
+    const localEntry = (await cache.get("key"))!;
 
     const olderEntry: OfflineCacheEntry = {
       key: "key",
@@ -103,7 +103,7 @@ describe("OfflineCacheManager", () => {
 
     const imported = cache.importAll([olderEntry]);
     expect(imported).toBe(0);
-    expect(cache.get("key")!.version).toBe(localEntry.version);
+    expect((await cache.get("key"))!.version).toBe(localEntry.version);
   });
 });
 
@@ -409,7 +409,7 @@ describe("ConflictResolver", () => {
 });
 
 describe("SyncEngine", () => {
-  it("syncs operations to local cache", () => {
+  it("syncs operations to local cache", async () => {
     const engine = new SyncEngine();
     const cache = new OfflineCacheManager();
     const operations: PendingOperation[] = [
@@ -437,18 +437,18 @@ describe("SyncEngine", () => {
       },
     ];
 
-    const result = engine.syncToLocal(operations, cache);
+    const result = await engine.syncToLocal(operations, cache);
     expect(result.applied).toBe(2);
     expect(result.failed).toBe(0);
     expect(result.totalOperations).toBe(2);
-    expect(cache.get("note:1")).not.toBeNull();
-    expect(cache.get("note:2")).not.toBeNull();
+    expect(await cache.get("note:1")).not.toBeNull();
+    expect(await cache.get("note:2")).not.toBeNull();
   });
 
-  it("handles delete operations in syncToLocal", () => {
+  it("handles delete operations in syncToLocal", async () => {
     const engine = new SyncEngine();
     const cache = new OfflineCacheManager();
-    cache.set("note:1", { title: "To Delete" });
+    await cache.set("note:1", { title: "To Delete" });
 
     const operations: PendingOperation[] = [
       {
@@ -464,12 +464,12 @@ describe("SyncEngine", () => {
       },
     ];
 
-    const result = engine.syncToLocal(operations, cache);
+    const result = await engine.syncToLocal(operations, cache);
     expect(result.applied).toBe(1);
-    expect(cache.get("note:1")).toBeNull();
+    expect(await cache.get("note:1")).toBeNull();
   });
 
-  it("syncs remote entries to local cache", () => {
+  it("syncs remote entries to local cache", async () => {
     const engine = new SyncEngine();
     const cache = new OfflineCacheManager();
 
@@ -485,16 +485,16 @@ describe("SyncEngine", () => {
       },
     ];
 
-    const result = engine.syncToRemote(cache, remoteEntries);
+    const result = await engine.syncToRemote(cache, remoteEntries);
     expect(result.applied).toBe(1);
     expect(result.conflicts).toHaveLength(0);
-    expect(cache.get("note:1")).not.toBeNull();
+    expect(await cache.get("note:1")).not.toBeNull();
   });
 
-  it("detects conflicts during syncToRemote", () => {
+  it("detects conflicts during syncToRemote", async () => {
     const engine = new SyncEngine();
     const cache = new OfflineCacheManager();
-    cache.set("note:1", { title: "Local" });
+    await cache.set("note:1", { title: "Local" });
 
     const remoteEntries: OfflineCacheEntry[] = [
       {
@@ -508,7 +508,7 @@ describe("SyncEngine", () => {
       },
     ];
 
-    const result = engine.syncToRemote(cache, remoteEntries);
+    const result = await engine.syncToRemote(cache, remoteEntries);
     expect(result.conflicts.length).toBeGreaterThan(0);
     expect(result.applied).toBe(1);
   });

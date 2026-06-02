@@ -200,7 +200,7 @@ describe("E2E API Integration", () => {
         method: "PATCH",
         url: `/api/artifacts/${artifactId}/blocks/${blockId}`,
         payload: {
-          contentJson: { title: "Updated Opening", text: "Updated welcome" },
+          contentJson: { title: "Updated Opening", text: "Updated welcome", evidenceRefs: ["evidence_e2e"] },
           responsibilityColor: "green",
           verificationStatus: "verified",
           updatedBy: "user_e2e"
@@ -218,7 +218,7 @@ describe("E2E API Integration", () => {
         url: `/api/projects/${projectId}/human-gates`,
         payload: {
           gateType: "artifact_export",
-          reason: "High risk content requires confirmation",
+          reason: `Final export requires verifier review and explicit confirmation; artifact:${artifactId}; user:user_e2e`,
           riskLevel: "L2"
         }
       });

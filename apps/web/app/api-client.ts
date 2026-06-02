@@ -22,6 +22,16 @@ export type { ArtifactBlockSummary };
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+export function getAuthHeaders(): Record<string, string> {
+  try {
+    const storage = globalThis.localStorage;
+    const token = storage?.getItem("zhixu_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 export interface ApiError {
   code: string;
   message: string;
@@ -57,6 +67,7 @@ async function request<T>(
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
   const headers: Record<string, string> = {
+    ...getAuthHeaders(),
     ...(options.headers as Record<string, string> ?? {}),
   };
   if (options.body && !headers["Content-Type"]) {
@@ -103,6 +114,51 @@ export interface ReadyResponse {
     api: string;
     database: string;
   };
+}
+
+export interface MaterialItem {
+  id: string;
+  fileName: string;
+  fileType: string;
+  projectId: string;
+  projectTitle: string;
+  parseStatus: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  sensitivityLevel: string;
+  summary?: string;
+  storageUri: string;
+}
+
+export interface ScheduleEvent {
+  id: string;
+  title: string;
+  projectTitle: string;
+  projectId: string;
+  type: "task" | "exam" | "meeting" | "deadline" | "review";
+  dueAt: string;
+  priority: number;
+  status: string;
+  riskLevel?: string;
+}
+
+export interface ExamCountdown {
+  id: string;
+  projectId: string;
+  projectTitle: string;
+  examDate: string;
+  daysRemaining: number;
+  subject?: string;
+  progress?: number;
+}
+
+export interface DashboardSummary {
+  examCountdowns?: ExamCountdown[];
+}
+
+export interface ChatToDocumentResult {
+  projectId: string;
+  artifactId: string;
 }
 
 export interface StateDefinition {
@@ -402,6 +458,29 @@ export function listProjects(): Promise<ProjectSummary[]> {
   return request<ProjectSummary[]>("/api/projects");
 }
 
+export function listMaterials(): Promise<MaterialItem[]> {
+  return request<MaterialItem[]>("/api/materials");
+}
+
+export function listSchedule(): Promise<ScheduleEvent[]> {
+  return request<ScheduleEvent[]>("/api/schedule");
+}
+
+export function getDashboard(): Promise<DashboardSummary> {
+  return request<DashboardSummary>("/api/dashboard");
+}
+
+export function convertChatToDocument(input: {
+  messages: Array<{ role: string; content: string }>;
+  projectId?: string;
+  title?: string;
+}): Promise<ChatToDocumentResult> {
+  return request<ChatToDocumentResult>("/api/chat/to-document", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function createProject(input: CreateProjectInput): Promise<ProjectSummary> {
   return request<ProjectSummary>("/api/projects", {
     method: "POST",
@@ -477,6 +556,12 @@ export async function uploadFile(projectId: string, file: File): Promise<UploadR
 
 export function listSources(projectId: string): Promise<SourceSummary[]> {
   return request<SourceSummary[]>(`/api/projects/${projectId}/sources`);
+}
+
+export function deleteSource(projectId: string, sourceId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/api/projects/${projectId}/sources/${sourceId}`, {
+    method: "DELETE",
+  });
 }
 
 export function addTask(projectId: string, input: CreateTaskInput): Promise<TaskSummary> {
@@ -869,6 +954,7 @@ async function requestRaw(
 ): Promise<Blob> {
   const url = `${BASE_URL}${path}`;
   const headers: Record<string, string> = {
+    ...getAuthHeaders(),
     ...(options.headers as Record<string, string> ?? {}),
   };
   if (options.body && !headers["Content-Type"]) {
@@ -896,6 +982,23 @@ async function requestRaw(
   }
 
   return response.blob();
+}
+
+export function workspaceFileDownloadUrl(path: string, projectId: string | null | undefined): string | null {
+  if (!projectId) return null;
+  const normalized = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  const projectPrefix = `${projectId}/`;
+  const nestedProjectPrefix = `projects/${projectId}/`;
+  const nestedIndex = normalized.indexOf(nestedProjectPrefix);
+  const scopedPath = normalized.startsWith(nestedProjectPrefix)
+    ? normalized
+    : normalized.startsWith(projectPrefix)
+      ? normalized
+      : nestedIndex >= 0
+        ? normalized.slice(nestedIndex)
+        : null;
+  if (!scopedPath) return null;
+  return `${BASE_URL}/api/workspace/files/${encodeURIComponent(scopedPath)}?projectId=${encodeURIComponent(projectId)}`;
 }
 
 export interface PaperMatrix {
@@ -1542,4 +1645,212 @@ export async function getContributionReport(projectId: string, params?: { start?
   if (params?.activities) query.set("activities", JSON.stringify(params.activities));
   const qs = query.toString();
   return request<ContributionReportSummary>(`/api/projects/${projectId}/collab/contributions${qs ? `?${qs}` : ""}`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Agent Canvas Workspace API
+// ─────────────────────────────────────────────────────────────
+
+export interface AgentSessionSummary {
+  id: string;
+  projectId: string;
+  workflowIntent: string;
+  currentPhase: string;
+  briefJson: Record<string, unknown>;
+  selectedDecision: string | null;
+  canvasStateJson: Record<string, unknown>;
+  progressJson: unknown[];
+  agentsJson: unknown[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAgentSessionInput {
+  projectId: string;
+  workflowIntent?: string;
+}
+
+export interface UpdateAgentSessionInput {
+  currentPhase?: string;
+  selectedDecision?: string;
+  briefJson?: Record<string, unknown>;
+  canvasStateJson?: Record<string, unknown>;
+  progressJson?: unknown[];
+  agentsJson?: unknown[];
+}
+
+export interface AdvancePhaseInput {
+  phase: string;
+}
+
+export interface CanvasPatchInput {
+  artifactId: string;
+  operation: "upsert_block" | "delete_block" | "update_block" | "bind_evidence" | "set_responsibility";
+  blockType: string;
+  contentJson: Record<string, unknown>;
+  evidenceRefs: string[];
+  responsibilityColor: string;
+  orderIndex?: number;
+}
+
+export function createAgentSession(input: CreateAgentSessionInput): Promise<AgentSessionSummary> {
+  return request<AgentSessionSummary>("/api/agent-sessions", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getAgentSession(id: string): Promise<AgentSessionSummary> {
+  return request<AgentSessionSummary>(`/api/agent-sessions/${id}`);
+}
+
+export function updateAgentSession(id: string, input: UpdateAgentSessionInput): Promise<AgentSessionSummary> {
+  return request<AgentSessionSummary>(`/api/agent-sessions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function advanceAgentPhase(id: string, input: AdvancePhaseInput): Promise<AgentSessionSummary> {
+  return request<AgentSessionSummary>(`/api/agent-sessions/${id}/advance`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function patchAgentCanvas(id: string, input: CanvasPatchInput): Promise<AgentSessionSummary> {
+  return request<AgentSessionSummary>(`/api/agent-sessions/${id}/canvas-patch`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function listAgentSessions(projectId: string): Promise<AgentSessionSummary[]> {
+  return request<AgentSessionSummary[]>(`/api/agent-sessions/project/${projectId}`);
+}
+
+export interface WorkflowSSEEvent {
+  event: string;
+  data: unknown;
+}
+
+export function runCoursePresentation(input: {
+  projectId?: string;
+  rawInput: string;
+  sources?: Array<{ id: string; fileName: string; summary?: string }>;
+  dueDate?: string;
+  presentationDuration?: number;
+}, callbacks: {
+  onThinking?: (entry: unknown) => void;
+  onProgress?: (event: unknown) => void;
+  onAgentStatus?: (update: unknown) => void;
+  onCanvasPatch?: (patch: unknown) => void;
+  onDecision?: (cards: unknown) => void;
+  onComplete?: (result: unknown) => void;
+  onError?: (error: unknown) => void;
+}): void {
+  const body = JSON.stringify(input);
+  fetch("/api/workflows/course-presentation", { method: "POST", body, headers: { "Content-Type": "application/json" } })
+    .then((response) => {
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      function processSSE() {
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const lines = part.split("\n");
+            let event = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) event = line.slice(7);
+              else if (line.startsWith("data: ")) data = line.slice(6);
+            }
+            if (!data) continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (event === "agent_thinking") callbacks.onThinking?.(parsed);
+              else if (event === "agent_progress") callbacks.onProgress?.(parsed);
+              else if (event === "agent_status") callbacks.onAgentStatus?.(parsed);
+              else if (event === "canvas_patch") callbacks.onCanvasPatch?.(parsed);
+              else if (event === "agent_decision") callbacks.onDecision?.(parsed);
+              else if (event === "workflow_complete") callbacks.onComplete?.(parsed);
+              else if (event === "workflow_error") callbacks.onError?.(parsed);
+            } catch {}
+          }
+          processSSE();
+        });
+      }
+      processSSE();
+    })
+    .catch((err) => callbacks.onError?.({ message: err.message }));
+}
+
+export function runLabMeeting(input: {
+  projectId?: string;
+  rawInput: string;
+  sources?: Array<{ id: string; fileName: string; summary?: string }>;
+  dueDate?: string;
+  presentationDuration?: number;
+}, callbacks: {
+  onThinking?: (entry: unknown) => void;
+  onProgress?: (event: unknown) => void;
+  onAgentStatus?: (update: unknown) => void;
+  onCanvasPatch?: (patch: unknown) => void;
+  onDecision?: (cards: unknown) => void;
+  onComplete?: (result: unknown) => void;
+  onError?: (error: unknown) => void;
+}): void {
+  const body = JSON.stringify(input);
+  fetch("/api/workflows/lab-meeting", { method: "POST", body, headers: { "Content-Type": "application/json" } })
+    .then((response) => {
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      function processSSE() {
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const lines = part.split("\n");
+            let event = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) event = line.slice(7);
+              else if (line.startsWith("data: ")) data = line.slice(6);
+            }
+            if (!data) continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (event === "agent_thinking") callbacks.onThinking?.(parsed);
+              else if (event === "agent_progress") callbacks.onProgress?.(parsed);
+              else if (event === "agent_status") callbacks.onAgentStatus?.(parsed);
+              else if (event === "canvas_patch") callbacks.onCanvasPatch?.(parsed);
+              else if (event === "agent_decision") callbacks.onDecision?.(parsed);
+              else if (event === "workflow_complete") callbacks.onComplete?.(parsed);
+              else if (event === "workflow_error") callbacks.onError?.(parsed);
+            } catch {}
+          }
+          processSSE();
+        });
+      }
+      processSSE();
+    })
+    .catch((err) => callbacks.onError?.({ message: err.message }));
+}
+
+export function resumeWorkflow(agentSessionId: string, decision?: string): Promise<{ data: { resumed: boolean; decision: string | null } }> {
+  return request("/api/workflows/resume", {
+    method: "POST",
+    body: JSON.stringify({ agentSessionId, decision }),
+  });
 }

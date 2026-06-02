@@ -137,4 +137,76 @@ export class DiagnosticEngine {
       };
     }
   }
+
+  async generateInsightReportEnhanced(
+    project: { title: string; type: string; tasks: Array<{ status: string; title: string }>; artifacts: Array<{ status: string; title: string }> },
+    llm: LLMCallable
+  ): Promise<DiagnosticReport & { aiInsights: string[] }> {
+    const completedTasks = project.tasks.filter((t) => t.status === "completed" || t.status === "done");
+    const taskCompletionRate = project.tasks.length > 0 ? completedTasks.length / project.tasks.length : 0;
+
+    const completedArtifacts = project.artifacts.filter((a) => a.status === "completed" || a.status === "done");
+    const artifactCompletionRate = project.artifacts.length > 0 ? completedArtifacts.length / project.artifacts.length : 0;
+
+    const riskAreas: string[] = [];
+    const strengthAreas: string[] = [];
+    const recommendations: string[] = [];
+
+    if (taskCompletionRate < 0.5) {
+      riskAreas.push("Low task completion rate");
+    } else if (taskCompletionRate >= 0.8) {
+      strengthAreas.push("High task completion rate");
+    }
+
+    if (artifactCompletionRate < 0.5) {
+      riskAreas.push("Low artifact completion rate");
+    } else if (artifactCompletionRate >= 0.8) {
+      strengthAreas.push("High artifact completion rate");
+    }
+
+    if (taskCompletionRate < 0.7) {
+      recommendations.push("Focus on completing pending tasks before starting new ones");
+    }
+    if (artifactCompletionRate < 0.6) {
+      recommendations.push("Improve artifact completion and documentation quality");
+    }
+    if (recommendations.length === 0) {
+      recommendations.push("Continue current pace and maintain quality standards");
+    }
+
+    const knowledgeRetention = taskCompletionRate * 0.5 + artifactCompletionRate * 0.5;
+
+    const baseReport: DiagnosticReport = {
+      id: crypto.randomUUID(),
+      projectId: "",
+      period: { start: "", end: "" },
+      taskCompletionRate,
+      averageDelay: 0,
+      riskAreas,
+      strengthAreas,
+      recommendations,
+      knowledgeRetention,
+      verificationStatus: "green",
+    };
+
+    try {
+      const result = await llm.chat({
+        system: `你是一位学业导师。根据项目数据，给出 3-5 条具体可行的改进建议。
+返回 JSON：{"insights": ["..."]}`,
+        messages: [{ role: "user", content: `项目：${project.title}（${project.type}）\n任务完成率：${(taskCompletionRate * 100).toFixed(0)}%\n成果完成率：${(artifactCompletionRate * 100).toFixed(0)}%\n风险领域：${riskAreas.join("、")}\n优势领域：${strengthAreas.join("、")}` }],
+        responseFormat: { type: "json_object" },
+      });
+      const parsed = JSON.parse(result.content);
+      return {
+        ...baseReport,
+        aiInsights: parsed.insights ?? [],
+        verificationStatus: "yellow",
+      };
+    } catch {
+      return {
+        ...baseReport,
+        aiInsights: [],
+      };
+    }
+  }
 }

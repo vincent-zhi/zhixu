@@ -1,14 +1,25 @@
-import type { OfflineCacheEntry } from "./types.js";
+import type { OfflineCacheEntry, CachedItem } from "./types.js";
+
+export interface OfflineStore {
+  getCached(key: string): Promise<CachedItem | null>;
+  setCached(key: string, item: CachedItem): Promise<void>;
+  removeCached(key: string): Promise<void>;
+}
 
 export class OfflineCacheManager {
   private cache = new Map<string, OfflineCacheEntry>();
   private deviceId = crypto.randomUUID();
 
-  get(key: string): OfflineCacheEntry | null {
+  constructor(private store?: OfflineStore) {}
+
+  async get(key: string): Promise<OfflineCacheEntry | null> {
+    if (this.store) {
+      return this.store.getCached(key);
+    }
     return this.cache.get(key) ?? null;
   }
 
-  set(key: string, data: unknown, options?: { expiresAt?: string; encrypted?: boolean }): OfflineCacheEntry {
+  async set(key: string, data: unknown, options?: { expiresAt?: string; encrypted?: boolean }): Promise<OfflineCacheEntry> {
     const existing = this.cache.get(key);
     const version = existing ? existing.version + 1 : 1;
     const entry: OfflineCacheEntry = {
@@ -20,11 +31,23 @@ export class OfflineCacheManager {
       expiresAt: options?.expiresAt ?? null,
       encrypted: options?.encrypted ?? false,
     };
-    this.cache.set(key, entry);
+
+    if (this.store) {
+      await this.store.setCached(key, entry);
+    } else {
+      this.cache.set(key, entry);
+    }
+
     return entry;
   }
 
-  delete(key: string): boolean {
+  async delete(key: string): Promise<boolean> {
+    if (this.store) {
+      const exists = this.cache.has(key);
+      await this.store.removeCached(key);
+      this.cache.delete(key);
+      return exists;
+    }
     return this.cache.delete(key);
   }
 

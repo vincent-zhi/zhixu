@@ -5,10 +5,10 @@
   "type": "module",
   "packageManager": "pnpm@10.12.1",
   "scripts": {
-    "build": "pnpm --filter @zhixu/core --filter @zhixu/agent-core --filter @zhixu/config --filter @zhixu/skill-runtime --filter @zhixu/document-intelligence --filter @zhixu/db build && pnpm --filter @zhixu/server --filter @zhixu/web --filter @zhixu/desktop build",
+    "build": "pnpm --filter @zhixu/core --filter @zhixu/agent-core --filter @zhixu/agent-harness --filter @zhixu/agent-os --filter @zhixu/config --filter @zhixu/skill-runtime --filter @zhixu/document-intelligence --filter @zhixu/db build && pnpm --filter @zhixu/server --filter @zhixu/web --filter @zhixu/desktop build",
     "dev": "pnpm --parallel dev",
-    "test": "pnpm --filter @zhixu/core --filter @zhixu/agent-core --filter @zhixu/config --filter @zhixu/skill-runtime --filter @zhixu/document-intelligence --filter @zhixu/db build && pnpm -r test",
-    "typecheck": "pnpm --filter @zhixu/core --filter @zhixu/agent-core --filter @zhixu/config --filter @zhixu/skill-runtime --filter @zhixu/document-intelligence --filter @zhixu/db build && pnpm -r typecheck",
+    "test": "pnpm --filter @zhixu/core --filter @zhixu/agent-core --filter @zhixu/agent-harness --filter @zhixu/agent-os --filter @zhixu/config --filter @zhixu/skill-runtime --filter @zhixu/document-intelligence --filter @zhixu/db build && pnpm -r test",
+    "typecheck": "pnpm --filter @zhixu/core --filter @zhixu/agent-core --filter @zhixu/agent-harness --filter @zhixu/agent-os --filter @zhixu/config --filter @zhixu/skill-runtime --filter @zhixu/document-intelligence --filter @zhixu/db build && pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "db:generate": "pnpm --filter @zhixu/db db:generate",
     "db:migrate": "pnpm --filter @zhixu/db db:migrate"

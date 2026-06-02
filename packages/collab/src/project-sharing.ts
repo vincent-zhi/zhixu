@@ -1,15 +1,23 @@
-import type { ProjectShare } from "./types.js";
+import type { ProjectShare, ShareLink } from "./types.js";
 
-const shares = new Map<string, ProjectShare>();
+export interface SharingStore {
+  getShares(projectId: string): Promise<ShareLink[]>;
+  saveShare(share: ShareLink): Promise<void>;
+  deleteShare(shareId: string): Promise<void>;
+}
 
 export class ProjectSharingManager {
-  createShare(input: {
+  private shares = new Map<string, ProjectShare>();
+
+  constructor(private store?: SharingStore) {}
+
+  async createShare(input: {
     projectId: string;
     sharedBy: string;
     shareType: ProjectShare["shareType"];
     recipientIds: string[];
     expiresAt?: string;
-  }): ProjectShare {
+  }): Promise<ProjectShare> {
     const share: ProjectShare = {
       id: crypto.randomUUID(),
       projectId: input.projectId,
@@ -19,30 +27,45 @@ export class ProjectSharingManager {
       expiresAt: input.expiresAt ?? null,
       createdAt: new Date().toISOString(),
     };
-    shares.set(share.id, share);
+
+    if (this.store) {
+      await this.store.saveShare(share);
+    } else {
+      this.shares.set(share.id, share);
+    }
+
     return share;
   }
 
-  revokeShare(shareId: string): boolean {
-    return shares.delete(shareId);
+  async revokeShare(shareId: string): Promise<boolean> {
+    if (this.store) {
+      const exists = this.shares.has(shareId);
+      await this.store.deleteShare(shareId);
+      this.shares.delete(shareId);
+      return exists;
+    }
+    return this.shares.delete(shareId);
   }
 
   getShare(shareId: string): ProjectShare | undefined {
-    return shares.get(shareId);
+    return this.shares.get(shareId);
   }
 
-  listSharesByProject(projectId: string): ProjectShare[] {
-    return [...shares.values()].filter((s) => s.projectId === projectId);
+  async listSharesByProject(projectId: string): Promise<ProjectShare[]> {
+    if (this.store) {
+      return this.store.getShares(projectId);
+    }
+    return [...this.shares.values()].filter((s) => s.projectId === projectId);
   }
 
   listSharesByUser(userId: string): ProjectShare[] {
-    return [...shares.values()].filter(
+    return [...this.shares.values()].filter(
       (s) => s.recipientIds.includes(userId) || s.sharedBy === userId
     );
   }
 
   checkAccess(shareId: string, userId: string): boolean {
-    const share = shares.get(shareId);
+    const share = this.shares.get(shareId);
     if (!share) return false;
 
     if (share.expiresAt) {
@@ -54,7 +77,7 @@ export class ProjectSharingManager {
   }
 
   checkProjectAccess(projectId: string, userId: string): ProjectShare | undefined {
-    for (const share of shares.values()) {
+    for (const share of this.shares.values()) {
       if (share.projectId !== projectId) continue;
 
       if (share.expiresAt) {

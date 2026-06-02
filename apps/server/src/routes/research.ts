@@ -2,27 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ProjectStore } from "../project-store.js";
 import type { ModelGateway } from "../model-gateway.js";
 import { PaperReader } from "@zhixu/research";
-import type { LLMCallable } from "@zhixu/research";
-
-function asLLMCallable(gateway: ModelGateway): LLMCallable | null {
-  if (!gateway.chatWithTools) return null;
-  return {
-    async chat(params) {
-      const result = await gateway.chatWithTools!({
-        messages: [
-          { role: "system", content: params.system },
-          ...params.messages.map((m) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })),
-        ],
-        systemPrompt: params.system,
-      });
-      const response = result.response as any;
-      return { content: response?.content ?? response?.choices?.[0]?.message?.content ?? "{}" };
-    },
-  };
-}
+import { asLLMCallable } from "../llm-adapter.js";
 
 export async function registerResearchRoutes(fastify: FastifyInstance, store: ProjectStore, gateway: ModelGateway): Promise<void> {
   const reader = new PaperReader();

@@ -18,7 +18,11 @@
   "dependencies": {
     "@zhixu/core": "workspace:*",
     "@zhixu/agent-core": "workspace:*",
-    "@zhixu/skill-runtime": "workspace:*"
+    "@zhixu/skill-runtime": "workspace:*",
+    "@zhixu/agent-harness": "workspace:*",
+    "@zhixu/research": "workspace:*",
+    "@zhixu/paper-reading": "workspace:*",
+    "@zhixu/ppt-cocreation": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

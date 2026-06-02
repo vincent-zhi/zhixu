@@ -1,7 +1,24 @@
 import { z } from "zod";
 import { ResponsibilityColorSchema, RiskLevelSchema } from "@zhixu/core";
 
-export const CanvasBlockSchema = z.object({
+export interface CanvasBlock {
+  id: string;
+  type: "heading" | "paragraph" | "bullet_list" | "table" | "figure" | "citation" | "formula" | "checklist" | "slide" | "code" | "quote" | "image_placeholder";
+  content: string;
+  level?: number | undefined;
+  metadata: Record<string, unknown>;
+  orderIndex: number;
+  parentId?: string | null | undefined;
+  children: CanvasBlock[];
+  responsibilityColor: "green" | "yellow" | "gray";
+  verificationStatus: "unverified" | "pending" | "verified" | "rejected";
+  evidenceRefs: string[];
+  comments: Array<{ id: string; userId: string; text: string; createdAt: string }>;
+  versionId?: string | undefined;
+  isStreaming: boolean;
+}
+
+export const CanvasBlockSchema: z.ZodType<CanvasBlock> = z.object({
   id: z.string(),
   type: z.enum(["heading", "paragraph", "bullet_list", "table", "figure", "citation", "formula", "checklist", "slide", "code", "quote", "image_placeholder"]),
   content: z.string(),
@@ -46,6 +63,5 @@ export const CanvasOperationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("end_streaming"), blockId: z.string() })
 ]);
 
-export type CanvasBlock = z.infer<typeof CanvasBlockSchema>;
 export type CanvasDocument = z.infer<typeof CanvasDocumentSchema>;
 export type CanvasOperation = z.infer<typeof CanvasOperationSchema>;

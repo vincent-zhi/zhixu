@@ -88,7 +88,7 @@ const STORAGE_KEY = "zhixu_settings";
 function loadLocalSettings(): LocalSettings {
   if (typeof window === "undefined") {
     return {
-      privacyMode: "cloud",
+      privacyMode: "local_first",
       notificationStrength: "normal",
       dailySummary: true,
       doNotDisturb: false,
@@ -101,7 +101,7 @@ function loadLocalSettings(): LocalSettings {
     if (stored) return JSON.parse(stored);
   } catch {}
   return {
-    privacyMode: "cloud",
+    privacyMode: "local_first",
     notificationStrength: "normal",
     dailySummary: true,
     doNotDisturb: false,

@@ -12,7 +12,9 @@ describe("parseEnv", () => {
     expect(env.S3_BUCKET).toBe("zhixu-local");
   });
 
-  it("fails fast when DATABASE_URL is missing", () => {
-    expect(() => parseEnv({})).toThrow(/DATABASE_URL/);
+  it("provides default values when DATABASE_URL is missing", () => {
+    const env = parseEnv({});
+    expect(env.DATABASE_URL).toBe("file:./dev.db");
+    expect(env.REDIS_URL).toBe("redis://localhost:6379");
   });
 });

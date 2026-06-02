@@ -108,7 +108,7 @@ selectFileButton?.addEventListener("click", async () => {
     const files = Array.isArray(selected) ? selected : [selected];
     const connectionStatus = document.querySelector<HTMLElement>("#connection-status");
     if (connectionStatus) {
-      connectionStatus.textContent = `已选择 ${files.length} 个文件：${files.map((f) => f.name ?? f.path.split(/[\\/]/).pop() ?? "").join(", ")}`;
+      connectionStatus.textContent = `已选择 ${files.length} 个文件：${files.map((f) => f.split(/[\\/]/).pop() ?? "").join(", ")}`;
     }
   } catch {
     const connectionStatus = document.querySelector<HTMLElement>("#connection-status");

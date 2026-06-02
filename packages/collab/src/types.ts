@@ -8,6 +8,8 @@ export interface ProjectShare {
   createdAt: string;
 }
 
+export type ShareLink = ProjectShare;
+
 export interface SharedKnowledgebase {
   id: string;
   workspaceId: string;

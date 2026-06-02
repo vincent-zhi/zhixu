@@ -16,7 +16,7 @@ function parseSectionsByHeadings(content: string): SectionMap {
       if (currentContent.length > 0) {
         sections[currentHeading] = currentContent.join(" ").trim();
       }
-      currentHeading = headingMatch[1].toLowerCase().replace(/[^a-z0-9]/g, "_");
+      currentHeading = headingMatch[1]?.toLowerCase().replace(/[^a-z0-9]/g, "_") ?? "untitled";
       currentContent = [];
     } else {
       currentContent.push(line);

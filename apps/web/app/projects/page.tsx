@@ -111,7 +111,7 @@ export default function ProjectsPage() {
         description: form.description.trim() || undefined,
         dueDate: form.dueDate ? new Date(form.dueDate) : undefined,
         priority: 3,
-        privacyMode: "cloud",
+        privacyMode: "local_first",
         riskLevel: "L1",
       });
       setShowModal(false);

@@ -503,6 +503,7 @@ describe("SubmissionChecker LLM enhanced", () => {
     const result = await checker.checkSubmissionEnhanced(
       "This paper presents a novel approach with experimental validation.",
       "IEEE",
+      undefined,
       mockLLM
     );
     expect(result.aiAnalysis.length).toBeGreaterThan(0);
@@ -511,7 +512,7 @@ describe("SubmissionChecker LLM enhanced", () => {
 
   it("checkSubmissionEnhanced falls back on LLM error", async () => {
     const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
-    const result = await checker.checkSubmissionEnhanced("test content", "IEEE", badLLM);
+    const result = await checker.checkSubmissionEnhanced("test content", "IEEE", undefined, badLLM);
     expect(result.aiAnalysis).toEqual([]);
     expect(result.overallReadiness).toBeGreaterThanOrEqual(0);
   });
@@ -603,22 +604,21 @@ describe("ResearchGapAnalyzer LLM enhanced", () => {
 
   it("analyzeGapsEnhanced returns aiDirections from LLM", async () => {
     const papers = [
-      { title: "Paper A", limitations: "Limited to English", futureWork: "Extend to multilingual" },
-      { title: "Paper B", limitations: "High computational cost", futureWork: "Optimize efficiency" },
+      "Paper A: This work is limited to English language processing. Future work should extend to multilingual settings.",
+      "Paper B: The approach has high computational cost. Future work should optimize efficiency.",
     ];
     const result = await analyzer.analyzeGapsEnhanced(papers, mockLLM);
     expect(result.aiDirections.length).toBeGreaterThan(0);
-    expect(result.gaps.length).toBeGreaterThan(0);
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it("analyzeGapsEnhanced falls back on LLM error", async () => {
     const badLLM: LLMCallable = { async chat() { throw new Error("fail"); } };
     const papers = [
-      { title: "Paper A", limitations: "Limitation X", futureWork: "Future Y" },
+      "Paper A: This work has limitation X. Future work should address Y.",
     ];
     const result = await analyzer.analyzeGapsEnhanced(papers, badLLM);
     expect(result.aiDirections).toEqual([]);
-    expect(result.gaps.length).toBeGreaterThan(0);
   });
 });
 

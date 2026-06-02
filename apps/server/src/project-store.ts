@@ -94,13 +94,29 @@ export interface ProjectStore {
   getProject(id: string): Promise<ProjectDetail | null>;
   createProject(input: CreateProjectInput): Promise<ProjectSummary>;
   addSource(projectId: string, input: CreateSourceInput): Promise<SourceSummary>;
+  updateSourceProcessingStatus(
+    sourceId: string,
+    input: { parseStatus?: string; ocrStatus?: string; indexStatus?: string }
+  ): Promise<SourceSummary | null>;
   addTask(projectId: string, input: CreateTaskInput): Promise<TaskSummary>;
   createArtifact(input: CreateArtifactInput): Promise<ArtifactSummary>;
+  createArtifactBlock(
+    artifactId: string,
+    input: { blockType: string; contentJson: Record<string, unknown>; orderIndex: number; responsibilityColor?: string; createdBy: string }
+  ): Promise<ArtifactBlockSummary | null>;
   updateArtifactBlock(
     artifactId: string,
     blockId: string,
     input: UpdateArtifactBlockInput
   ): Promise<ArtifactBlockSummary | null>;
+  deleteArtifactBlock(
+    artifactId: string,
+    blockId: string
+  ): Promise<ArtifactBlockSummary | null>;
+  reorderArtifactBlocks(
+    artifactId: string,
+    blockIds: string[]
+  ): Promise<ArtifactBlockSummary[] | null>;
   createHumanGate(
     projectId: string,
     input: CreateHumanGateInput
@@ -144,33 +160,34 @@ export class InMemoryProjectStore implements ProjectStore {
   private readonly versions = new Map<string, VersionSummary[]>();
   private readonly mentorFeedback = new Map<string, MentorFeedbackSummary[]>();
 
-  constructor() {
-    const project: MutableProject = {
-      id: "project_course_presentation",
-      workspaceId: "workspace_demo",
-      ownerId: "user_demo",
-      title: "Course Presentation",
-      type: "presentation",
-      description: "Prepare a 10-minute course presentation from uploaded materials.",
-      dueDate: "2026-06-03T10:00:00.000Z",
-      priority: 3,
-      status: "planned",
-      riskLevel: "L1",
-      privacyMode: "cloud",
-      nextAction: "Confirm slide-level outline and source scope",
-      sources: [],
-      tasks: [],
-      artifacts: [],
-      humanGates: [],
-      agentJobs: [],
-      auditLogs: []
-    };
-
-    this.projects.set(project.id, project);
-    this.memoryCandidates.set(project.id, []);
-    this.evidence.set(project.id, []);
-    this.capsules.set(project.id, []);
-    this.mentorFeedback.set(project.id, []);
+  constructor(private seedDemoData = false) {
+    if (seedDemoData) {
+      const project: MutableProject = {
+        id: "project_course_presentation",
+        workspaceId: "workspace_demo",
+        ownerId: "user_demo",
+        title: "Course Presentation",
+        type: "presentation",
+        description: "Prepare a 10-minute course presentation from uploaded materials.",
+        dueDate: "2026-06-03T10:00:00.000Z",
+        priority: 3,
+        status: "planned",
+        riskLevel: "L1",
+        privacyMode: "cloud",
+        nextAction: "Confirm slide-level outline and source scope",
+        sources: [],
+        tasks: [],
+        artifacts: [],
+        humanGates: [],
+        agentJobs: [],
+        auditLogs: [],
+      };
+      this.projects.set(project.id, project);
+      this.memoryCandidates.set(project.id, []);
+      this.evidence.set(project.id, []);
+      this.capsules.set(project.id, []);
+      this.mentorFeedback.set(project.id, []);
+    }
   }
 
   async listProjects(): Promise<ProjectSummary[]> {
@@ -259,6 +276,21 @@ export class InMemoryProjectStore implements ProjectStore {
       })
     );
     return structuredClone(source);
+  }
+
+  async updateSourceProcessingStatus(
+    sourceId: string,
+    input: { parseStatus?: string; ocrStatus?: string; indexStatus?: string }
+  ): Promise<SourceSummary | null> {
+    for (const project of this.projects.values()) {
+      const source = project.sources.find((candidate) => candidate.id === sourceId);
+      if (!source) continue;
+      if (input.parseStatus !== undefined) source.parseStatus = input.parseStatus;
+      if (input.ocrStatus !== undefined) source.ocrStatus = input.ocrStatus;
+      if (input.indexStatus !== undefined) source.indexStatus = input.indexStatus;
+      return structuredClone(source);
+    }
+    return null;
   }
 
   async addTask(projectId: string, input: CreateTaskInput): Promise<TaskSummary> {
@@ -369,6 +401,97 @@ export class InMemoryProjectStore implements ProjectStore {
       })
     );
     return structuredClone(block);
+  }
+
+  async createArtifactBlock(
+    artifactId: string,
+    input: { blockType: string; contentJson: Record<string, unknown>; orderIndex: number; responsibilityColor?: string; createdBy: string }
+  ): Promise<ArtifactBlockSummary | null> {
+    const project = this.findProjectByArtifact(artifactId);
+    if (!project) return null;
+
+    const artifact = project.artifacts.find((a) => a.id === artifactId);
+    if (!artifact) return null;
+
+    const now = new Date().toISOString();
+    const block: ArtifactBlockSummary = {
+      id: crypto.randomUUID(),
+      artifactId,
+      parentBlockId: null,
+      blockType: input.blockType,
+      contentJson: input.contentJson,
+      orderIndex: input.orderIndex,
+      responsibilityColor: (input.responsibilityColor as ArtifactBlockSummary["responsibilityColor"]) ?? "gray",
+      verificationStatus: "unverified",
+      createdBy: input.createdBy,
+      updatedBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    artifact.blocks.push(block);
+    project.auditLogs.push(
+      createAuditLog({
+        projectId: project.id,
+        actorId: input.createdBy,
+        action: "artifact_block.created",
+        targetType: "ArtifactBlock",
+        targetId: block.id,
+        createdAt: now
+      })
+    );
+    return structuredClone(block);
+  }
+
+  async deleteArtifactBlock(
+    artifactId: string,
+    blockId: string
+  ): Promise<ArtifactBlockSummary | null> {
+    const project = this.findProjectByArtifact(artifactId);
+    if (!project) return null;
+
+    const artifact = project.artifacts.find((a) => a.id === artifactId);
+    if (!artifact) return null;
+
+    const blockIndex = artifact.blocks.findIndex((b) => b.id === blockId);
+    if (blockIndex === -1) return null;
+
+    const [removed] = artifact.blocks.splice(blockIndex, 1);
+    if (!removed) return null;
+    project.auditLogs.push(
+      createAuditLog({
+        projectId: project.id,
+        actorId: "system",
+        action: "artifact_block.deleted",
+        targetType: "ArtifactBlock",
+        targetId: blockId,
+        createdAt: new Date().toISOString()
+      })
+    );
+    return structuredClone(removed);
+  }
+
+  async reorderArtifactBlocks(
+    artifactId: string,
+    blockIds: string[]
+  ): Promise<ArtifactBlockSummary[] | null> {
+    const project = this.findProjectByArtifact(artifactId);
+    if (!project) return null;
+
+    const artifact = project.artifacts.find((a) => a.id === artifactId);
+    if (!artifact) return null;
+
+    const reordered: ArtifactBlockSummary[] = [];
+    for (let i = 0; i < blockIds.length; i++) {
+      const block = artifact.blocks.find((b) => b.id === blockIds[i]);
+      if (block) {
+        block.orderIndex = i;
+        block.updatedAt = new Date().toISOString();
+        reordered.push(block);
+      }
+    }
+    artifact.blocks = reordered;
+    return structuredClone(reordered);
   }
 
   async createHumanGate(

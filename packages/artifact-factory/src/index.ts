@@ -5,3 +5,6 @@ export * from "./docx-renderer.js";
 export * from "./markdown-renderer.js";
 export * from "./pdf-renderer.js";
 export * from "./export-pipeline.js";
+export * from "./image-intent.js";
+export { detectImageIntent as detectImageIntentFromDetector, detectAllImageIntents } from "./image-intent-detector.js";
+export * from "./style-catalog.js";

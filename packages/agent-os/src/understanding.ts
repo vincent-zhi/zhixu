@@ -1,4 +1,4 @@
-import type { UnderstandingResult } from "./types.js";
+import type { UnderstandingResult, PresentationBrief } from "./types.js";
 
 const GOAL_KEYWORDS = [
   "我需要",
@@ -45,12 +45,24 @@ const RISK_URGENT_KEYWORDS = [
   "马上"
 ];
 
+const COURSE_PPT_PATTERNS: Array<{ pattern: RegExp; label: PresentationBrief["deliverableType"] }> = [
+  { pattern: /课程.*PPT|课程.*汇报|课.*presentation/ui, label: "course_ppt" },
+  { pattern: /组会|lab.?meeting|论文.*汇报|paper.*presentation/ui, label: "lab_meeting" },
+  { pattern: /复习|exam.*review|期末.*复习/ui, label: "exam_review" }
+];
+
+const COURSE_NAME_PATTERN = /(?:课程|课名|course)[:\s：]?\s*([^\s,，。.]{2,20})/ui;
+
+const DURATION_PATTERN = /(\d+)\s*(?:分钟|min|minutes)/ui;
+
+const PAGE_PATTERN = /(\d+)\s*(?:页|页码|slides?|张)/ui;
+
 export class UnderstandingAgent {
   analyze(input: {
     rawInput: string;
     sources: Array<{ id: string; fileName: string; summary?: string }>;
     dueDate?: string;
-  }): UnderstandingResult {
+  }): UnderstandingResult & { presentationBrief: PresentationBrief | null } {
     const goals = this.extractGoals(input.rawInput);
     const deliverables = this.extractDeliverables(input.rawInput);
     const sourceScope = input.sources.map((s) => s.fileName);
@@ -58,6 +70,7 @@ export class UnderstandingAgent {
     const sensitiveInfo = this.detectSensitiveInfo(input.sources, input.rawInput);
     const riskFlags = this.detectRiskFlags(input.rawInput, missingInfo, sensitiveInfo);
     const confidence = this.computeConfidence(goals, deliverables, missingInfo);
+    const presentationBrief = this.extractPresentationBrief(input);
 
     return {
       goals,
@@ -67,8 +80,65 @@ export class UnderstandingAgent {
       riskFlags,
       missingInfo,
       sensitiveInfo,
-      confidence
+      confidence,
+      presentationBrief
     };
+  }
+
+  private extractPresentationBrief(
+    input: {
+      rawInput: string;
+      sources: Array<{ id: string; fileName: string; summary?: string }>;
+      dueDate?: string;
+    }
+  ): PresentationBrief | null {
+    const deliverableType = this.detectDeliverableType(input.rawInput);
+    if (!deliverableType) return null;
+
+    const durationMatch = input.rawInput.match(DURATION_PATTERN);
+    const presentationDuration = durationMatch ? parseInt(durationMatch[1]!, 10) : 15;
+
+    const courseNameMatch = input.rawInput.match(COURSE_NAME_PATTERN);
+    const detectedCourseName = courseNameMatch ? courseNameMatch[1]! : null;
+
+    const pageMatch = input.rawInput.match(PAGE_PATTERN);
+    const pageRequirement = pageMatch ? parseInt(pageMatch[1]!, 10) : null;
+
+    const requiresEnglish = /英文|English|全英/i.test(input.rawInput);
+    const requiresSpeakerNotes = !/不需要.*备注|no.*notes/i.test(input.rawInput);
+
+    const targetAudience = deliverableType === "course_ppt"
+      ? "课程教师与同学"
+      : deliverableType === "lab_meeting"
+        ? "课题组导师与成员"
+        : "考试复习者";
+
+    const missingInfo: string[] = [];
+    if (!durationMatch) missingInfo.push("汇报时长未指定");
+    if (!detectedCourseName && deliverableType === "course_ppt") missingInfo.push("课程名称未检测到");
+
+    return {
+      id: crypto.randomUUID(),
+      projectId: "",
+      deliverableType,
+      presentationDuration,
+      deadline: input.dueDate ?? null,
+      targetAudience,
+      sourceIds: input.sources.map((s) => s.id),
+      missingInfo,
+      detectedCourseName,
+      requiresSpeakerNotes,
+      requiresEnglish,
+      pageRequirement
+    };
+  }
+
+  private detectDeliverableType(raw: string): PresentationBrief["deliverableType"] | null {
+    for (const { pattern, label } of COURSE_PPT_PATTERNS) {
+      if (pattern.test(raw)) return label;
+    }
+    if (/PPT|幻灯片|汇报|presentation/ui.test(raw)) return "course_ppt";
+    return null;
   }
 
   private extractGoals(raw: string): string[] {
